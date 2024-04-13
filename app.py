@@ -98,6 +98,60 @@ states_df = (
       .reset_index()
 )
 
+# Sector-Employees df
+
+sector_empl = pd.read_excel('https://www.census.gov/hfp/btos/downloads/Sector%20by%20Employment%20Size%20Class.xlsx',
+                            na_values='S')
+
+# naics_codes
+
+naics_codes = pd.read_excel("C:\\Users\\ormal\\Downloads\\2022_NAICS_Descriptions.xlsx")
+
+# naics codes cleanup
+
+naics_codes = (
+    naics_codes
+      .assign(
+          sector = lambda df_: df_['Code'].astype('str'),
+          title = lambda df_: df_['Title'].str.replace('T$','', regex=True).str.replace('and', '&')
+      )
+      .loc[lambda df_: df_['sector'].str.len() == 2]
+      .drop(['Code', 'Title', 'Description'], axis='columns')
+      .reset_index(drop=True)
+)
+
+# Firm size dictionary
+
+label_to_size = {'A': 'Small', 'B': 'Small', 'C': 'Small', 'D': "Small", 'E': 'Medium', 'F': 'Medium', 'G': "Large"}
+
+# sector and employees cleanup
+
+sector_empl = (
+    sector_empl
+      .drop(['Question ID', 'Answer ID'], axis = 'columns')
+      .dropna()
+      .loc[lambda df_: df_["Question"].str.contains('AI | Artificial Intelligence')]
+      .loc[lambda df_: df_["Sector"] != 'XX']
+      .assign(
+              question = lambda df_: df_['Question'].map(ai_map),
+              emp_size = lambda df_: df_["Empsize"].map(label_to_size)
+              )
+      .drop(['Empsize', 'Question'], axis='columns')
+      .melt(id_vars=['Sector', 'emp_size','question', 'Answer'], value_name='percentage', var_name='end_date')
+      .assign(
+               end_date = lambda df_: pd.to_datetime(df_['end_date'].astype('str').map(dates_map)),
+               percentage = lambda df_: df_['percentage'].str.rstrip('%').astype('float'),
+               sector = lambda df_: df_['Sector'].astype('str')
+               )
+       .drop('Sector', axis='columns')
+       .groupby(['sector', 'emp_size', 'question', 'Answer', pd.Grouper(key='end_date', freq='ME')])['percentage']
+       .mean().round(2)
+       .reset_index()
+       .pipe(lambda df_: pd.merge(naics_codes, df_, on='sector'))
+       .rename(columns = {'title': 'industry'})
+       .drop('sector', axis='columns')
+)
+
 # Instantiate the dash app
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.MINTY],
@@ -165,16 +219,20 @@ app.layout = dbc.Container([
                 value=[],
                 inline=True
                 ),
-        dcc.Graph(id='states-plot', figure={})  # Initialize with empty figure
-        ])
-            ,
+                dcc.Graph(id='states-plot', figure={})  # Initialize with empty figure
+        ]),
+        ], width={'size':5, 'offset':1},
+           xs=12, sm=12, md=12, lg=5, xl=5
+        ),
+        dbc.Col([
+                html.Div([
+
+                ])
+
         ], width={'size':5, 'offset':1},
            xs=12, sm=12, md=12, lg=5, xl=5
         )
-
-    ], justify='left')
-
-
+    ])
 ])
 
 # Callback for the States plot
@@ -184,7 +242,7 @@ app.layout = dbc.Container([
     [Input('state-dropdown', 'value'),
      Input('question-dropdown', 'value'),
      Input('answer-checkbox', 'value')]
-)
+     )
 def update_plot(selected_states, selected_question, selected_answers):
     # If any selection is missing, return empty figure
     if not (selected_states and selected_question and selected_answers):
@@ -226,6 +284,65 @@ def update_plot(selected_states, selected_question, selected_answers):
 
     return fig
 
+# Callback for industry sector and firm size plot
+
+@app.callback(
+    Output('sector-empl-plot', 'figure'),
+    [Input('industry-dropdown', 'value'),
+     Input('question-dropdown', 'value'),
+     Input('answer-checkbox', 'value')]
+)
+def update_plot(selected_industry, selected_question, selected_answers):
+    # If any selection is missing, return an empty figure
+    if not (selected_industry and selected_question and selected_answers):
+        return {}
+
+    # Convert single selected values to lists to match the logic in the filtering
+    if isinstance(selected_industry, str):
+        selected_industry = [selected_industry]
+    if isinstance(selected_question, str):
+        selected_question = [selected_question]
+    if isinstance(selected_answers, str):
+        selected_answers = [selected_answers]
+
+    # Filter DataFrame based on selections
+    filtered_df = sector_empl[(sector_empl['industry'].isin(selected_industry)) &
+                     (sector_empl['question'].isin(selected_question)) &
+                     (sector_empl['Answer'].isin(selected_answers))]
+
+    # If no data after filtering, return an empty figure
+    if filtered_df.empty:
+        return {}
+    median_value = filtered_df['percentage'].median()
+
+    # Create the line plot
+    fig = px.line(filtered_df, x='end_date', y='percentage', color='emp_size', color_discrete_sequence=px.colors.qualitative.Light24,
+                  title='Percentage of Firms Using AI',
+                  labels={'percentage': 'Percentage', 'end_date': 'Month/Year', 'emp_size': 'Firm Size'},
+                  template='plotly_white',
+                  width=800, height=400,)
+    fig.update_xaxes(
+        tickvals=filtered_df['end_date'].unique(),
+        tickformat= '%b %Y'
+    )
+
+    fig.update_traces(line=dict(width=3.5))
+
+    # Add dashed line representing median with annotation below the line
+    fig.add_shape(type='line',
+                  x0=filtered_df['end_date'].min(), y0=median_value,
+                  x1=filtered_df['end_date'].max(), y1=median_value,
+                  line=dict(color='red', width=2, dash='dash'),
+                  name='Median'
+                  )
+    fig.add_annotation(x=filtered_df['end_date'].max(), y=median_value - 0.5,
+                       xref="x", yref="y",
+                       text="National Median",
+                       showarrow=False,
+                       font=dict(family="Times New Roman", size=12, color="red")
+                       )
+
+    return fig
 
 if __name__=='__main__':
     app.run_server(debug=True, port=8000)
