@@ -133,7 +133,7 @@ app.layout = dbc.Container([
     dbc.Row([
         dbc.Col([
                 html.Div([
-                html.H1(children='AI Use across US States', style={'textAlign': 'left'}),
+                html.H2(children='AI Use across US States', style={'textAlign': 'left', 'color': 'green'}),
                 html.Label("Select States"),
                 dcc.Dropdown(
                         id='state-dropdown',
@@ -168,16 +168,63 @@ app.layout = dbc.Container([
         dcc.Graph(id='states-plot', figure={})  # Initialize with empty figure
         ])
             ,
-        ], #width={'size':5, 'offset':1},
+        ], width={'size':5, 'offset':1},
            xs=12, sm=12, md=12, lg=5, xl=5
         )
 
-    ])
+    ], justify='left')
 
 
 ])
 
+# Callback for the States plot
 
+@app.callback(
+    Output('states-plot', 'figure'),
+    [Input('state-dropdown', 'value'),
+     Input('question-dropdown', 'value'),
+     Input('answer-checkbox', 'value')]
+)
+def update_plot(selected_states, selected_question, selected_answers):
+    # If any selection is missing, return empty figure
+    if not (selected_states and selected_question and selected_answers):
+        return {}
+
+    # Filter DataFrame based on selections
+    filtered_df = states_df[(states_df['State'].isin(selected_states)) &
+                     (states_df['Question'].str.contains(selected_question)) &
+                     (states_df['Answer'].isin(selected_answers))]
+
+    # If no data after filtering, return empty figure
+    if filtered_df.empty:
+        return {}
+
+    # Calculate median for the selected data
+    median_value = filtered_df['percentage'].median()
+
+    fig = px.line(filtered_df, x='end_date', y='percentage', color='State',
+                  title='Percentage of Firms Using AI in creating products and services', color_discrete_sequence=px.colors.qualitative.Light24,
+                  width=800, height=400,
+                  template='plotly_white', labels={'percentage': 'Percentage',
+                                                   'end_date': 'Month/Year',
+                                                   'State': 'States'})
+    fig.update_traces(line=dict(width=3.5))
+
+    # Add dashed line representing median with annotation below the line
+    fig.add_shape(type='line',
+                  x0=filtered_df['end_date'].min(), y0=median_value,
+                  x1=filtered_df['end_date'].max(), y1=median_value,
+                  line=dict(color='red', width=2, dash='dash'),
+                  name='Median'
+                  )
+    fig.add_annotation(x=filtered_df['end_date'].max(), y=median_value - 0.5,
+                       xref="x", yref="y",
+                       text="National Median",
+                       showarrow=False,
+                       font=dict(family="Times New Roman", size=12, color="red")
+                       )
+
+    return fig
 
 
 if __name__=='__main__':
