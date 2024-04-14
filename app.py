@@ -186,12 +186,11 @@ app.layout = dbc.Container([
 
     dbc.Row([
         dbc.Col([
-                html.Div([
-                html.H2(children='AI Use across US States', style={'textAlign': 'left', 'color': 'green'}),
+                html.H4(children='AI Use across US States', style={'textAlign': 'center', 'color': 'green'}),
                 html.Label("Select States"),
                 dcc.Dropdown(
                         id='state-dropdown',
-                        style={'height': '30px', 'width': '800px'},
+                        style={'height': '30px', 'width': '300px'},
                         options=[{'label': s, 'value': s} for s in states_df['State'].unique()],
                         multi=True,
                         value=[],  # Default value empty list
@@ -199,8 +198,8 @@ app.layout = dbc.Container([
                 html.Br(),  # Adding space
                 html.Label("Select Question"),
                 dcc.Dropdown(
-                        id='question-dropdown',
-                        style={'height': '30px', 'width': '800px'},
+                        id='question-dropdown-state',
+                        style={'height': '30px', 'width': '300px'},
                         options=[
                             {'label': 'Intend to use AI next 6 months', 'value': 'Intend'},
                             {'label': 'Used AI last 2 weeks', 'value': 'Used'}
@@ -210,7 +209,7 @@ app.layout = dbc.Container([
                 html.Br(),  # Adding space
                 html.Label("Select Answer"),
                 dcc.Checklist(
-                    id='answer-checkbox',
+                    id='answer-checkbox-state',
                     options=[
                             {'label': 'Yes', 'value': 'Yes'},
                             {'label': 'No', 'value': 'No'},
@@ -220,18 +219,39 @@ app.layout = dbc.Container([
                 inline=True
                 ),
                 dcc.Graph(id='states-plot', figure={})  # Initialize with empty figure
-        ]),
-        ], width={'size':5, 'offset':1},
-           xs=12, sm=12, md=12, lg=5, xl=5
-        ),
+        ], xs=12, sm=12, md=12, lg=5, xl=5, width={'size': 5, 'offset':0, 'order': 1}, className='p-2'),
+
         dbc.Col([
-                html.Div([
-
-                ])
-
-        ], width={'size':5, 'offset':1},
-           xs=12, sm=12, md=12, lg=5, xl=5
-        )
+                html.H4(children='AI Use across Industries and Firm Sizes', style={'textAlign': 'center', 'color': 'green'}),
+                html.Label("Select Industry"),
+                dcc.Dropdown(
+                            id='industry-dropdown',
+                            style={'height': '30px', 'width': '300px'},
+                            options=[{'label': industry, 'value': industry} for industry in sector_empl['industry'].unique()],
+                            value=[],  # No initial value
+                            ),
+                html.Br(),
+                html.Label("Select Question"),
+                dcc.Dropdown(
+                            id='question-dropdown-sector',
+                            style={'height': '30px', 'width': '300px'},
+                            options=[{'label': question, 'value': question} for question in sector_empl['question'].unique()],
+                            value=[],
+                            ),
+                html.Br(),
+                html.Label("Select Answer"),
+                dcc.Checklist(
+                            id='answer-checkbox-sector',
+                            options= [
+                                    {'label': 'Yes', 'value': 'Yes'},
+                                    {'label': 'No', 'value': 'No'},
+                                    {'label': 'Do not know', 'value': 'Do not know'}
+                                    ],
+                            value=[],  # No initial value
+                            inline=True
+                            ),
+                dcc.Graph(id='sector-empl-plot', figure={})
+        ],  xs=12, sm=12, md=12, lg=5, xl=5, width={'size': 5,'offset': 0, 'order': 2}, className='p-2')
     ])
 ])
 
@@ -240,8 +260,8 @@ app.layout = dbc.Container([
 @app.callback(
     Output('states-plot', 'figure'),
     [Input('state-dropdown', 'value'),
-     Input('question-dropdown', 'value'),
-     Input('answer-checkbox', 'value')]
+     Input('question-dropdown-state', 'value'),
+     Input('answer-checkbox-sector', 'value')]
      )
 def update_plot(selected_states, selected_question, selected_answers):
     # If any selection is missing, return empty figure
@@ -289,8 +309,8 @@ def update_plot(selected_states, selected_question, selected_answers):
 @app.callback(
     Output('sector-empl-plot', 'figure'),
     [Input('industry-dropdown', 'value'),
-     Input('question-dropdown', 'value'),
-     Input('answer-checkbox', 'value')]
+     Input('question-dropdown-sector', 'value'),
+     Input('answer-checkbox-sector', 'value')]
 )
 def update_plot(selected_industry, selected_question, selected_answers):
     # If any selection is missing, return an empty figure
