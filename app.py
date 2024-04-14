@@ -190,7 +190,7 @@ app.layout = dbc.Container([
                 html.Label("Select States"),
                 dcc.Dropdown(
                         id='state-dropdown',
-                        style={'height': '30px', 'width': '500px'},
+                        style={'height': '20px', 'width': '500px'},
                         options=[{'label': s, 'value': s} for s in states_df['State'].unique()],
                         multi=True,
                         value=[],  # Default value empty list
@@ -199,7 +199,7 @@ app.layout = dbc.Container([
                 html.Label("Select Question"),
                 dcc.Dropdown(
                         id='question-dropdown-state',
-                        style={'height': '30px', 'width': '500px'},
+                        style={'height': '20px', 'width': '500px'},
                         options=[
                             {'label': 'Intend to use AI next 6 months', 'value': 'Intend'},
                             {'label': 'Used AI last 2 weeks', 'value': 'Used'}
@@ -227,17 +227,17 @@ app.layout = dbc.Container([
                 html.Label("Select Industry"),
                 dcc.Dropdown(
                             id='industry-dropdown',
-                            style={'height': '30px', 'width': '500px'},
+                            style={'height': '20px', 'width': '500px'},
                             options=[{'label': industry, 'value': industry} for industry in sector_empl['industry'].unique()],
-                            value=[],  # No initial value
+                            value=[]
                             ),
                 html.Br(),
                 html.Label("Select Question"),
                 dcc.Dropdown(
                             id='question-dropdown-sector',
-                            style={'height': '30px', 'width': '500px'},
+                            style={'height': '20px', 'width': '500px'},
                             options=[{'label': question, 'value': question} for question in sector_empl['question'].unique()],
-                            value=[],
+                            value=[]
                             ),
                 html.Br(),
                 html.Label("Select One Answer Choice"),
