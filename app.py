@@ -207,7 +207,7 @@ app.layout = dbc.Container([
                         value='None',  # Default value is None
                 ),
                 html.Br(),  # Adding space
-                html.Label("Select Answer"),
+                html.Label("Select One Answer Choice"),
                 dcc.Checklist(
                     id='answer-checkbox-state',
                     options=[
@@ -240,7 +240,7 @@ app.layout = dbc.Container([
                             value=[],
                             ),
                 html.Br(),
-                html.Label("Select Answer"),
+                html.Label("Select One Answer Choice"),
                 dcc.Checklist(
                             id='answer-checkbox-sector',
                             options= [
@@ -254,8 +254,11 @@ app.layout = dbc.Container([
                             ),
                 dcc.Graph(id='sector-empl-plot', figure={})
         ],  xs=12, sm=12, md=12, lg=5, xl=5, width={'size': 5,'offset': 0, 'order': 2}, className='p-2')
-    ], justify='center')
+    ], justify='center'),
 
+    dbc.Row([
+        dbc.Col(html.P("Omar Malik & Osama Kidwai\n @Azra Analytics", className="text-primary text-success text-right"), width=10),
+                ], justify="end", align="center", style={"position": "fixed", "bottom": 10, "right": 10, "zIndex": 999})
 
 ])
 
