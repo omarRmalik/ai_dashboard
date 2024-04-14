@@ -164,7 +164,7 @@ app.layout = dbc.Container([
 
     dbc.Row(
         dbc.Col(html.H1("National AI Adoption Tracker",
-                        className='text-center text-primary mb-4' 'text-success'),
+                        className='text-center text-success mb-4'),
                         width=12)
     ),
 
@@ -186,7 +186,7 @@ app.layout = dbc.Container([
 
     dbc.Row([
         dbc.Col([
-                html.H4(children='US States', style={'textAlign': 'center', 'color': 'green'}),
+                html.H4(children='US States', className='text-center text-success mb-4'),
                 html.Label("Select States"),
                 dcc.Dropdown(
                         id='state-dropdown',
@@ -223,7 +223,7 @@ app.layout = dbc.Container([
         ], xs=12, sm=12, md=12, lg=5, xl=5, width={'size': 5, 'offset':0, 'order': 1}, className='p-2'),
 
         dbc.Col([
-                html.H4(children='Industries and Firm Sizes', style={'textAlign': 'center', 'color': 'green'}),
+                html.H4(children='Industries and Firm Sizes', className='text-center text-success mb-4'),
                 html.Label("Select Industry"),
                 dcc.Dropdown(
                             id='industry-dropdown',
