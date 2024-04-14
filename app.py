@@ -371,5 +371,25 @@ def update_sector_plot(selected_industry, selected_question, selected_answers):
 
     return fig
 
+@app.callback(
+    Output('answer-checkbox-state', 'value'),
+    [Input('answer-checkbox-state', 'value')]
+)
+def update_checklist_value(selected_values):
+    # If multiple values are selected, keep only the last one
+    if len(selected_values) > 1:
+        return [selected_values[-1]]
+    return selected_values
+
+@app.callback(
+    Output('answer-checkbox-sector', 'value'),
+    [Input('answer-checkbox-sector', 'value')]
+)
+def update_checklist_value(selected_values):
+    # If multiple values are selected, keep only the last one
+    if len(selected_values) > 1:
+        return [selected_values[-1]]
+    return selected_values
+
 if __name__=='__main__':
     app.run_server(debug=True, port=8000)
