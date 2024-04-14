@@ -54,7 +54,7 @@ fig_yes = (
 )
 
 # Update layout
-fig_yes.update_layout(height=400, title_text='Used AI: Yes', font=dict(family="Times New Roman", size=16))
+fig_yes.update_layout(height=400, title_text='Used AI: Yes', font=dict(family="Times New Roman", size=16), showlegend=False)
 fig_yes.update_annotations(font=dict(family="Times New Roman", size=16))
 fig_yes.update_traces(line=dict(width=3.5))
 
@@ -164,7 +164,7 @@ app.layout = dbc.Container([
 
     dbc.Row(
         dbc.Col(html.H1("National AI Adoption Tracker",
-                        className='text-center text-primary mb-4'),
+                        className='text-center text-primary mb-4' 'text-success'),
                         width=12)
     ),
 
@@ -186,11 +186,11 @@ app.layout = dbc.Container([
 
     dbc.Row([
         dbc.Col([
-                html.H4(children='AI Use across US States', style={'textAlign': 'center', 'color': 'green'}),
+                html.H4(children='US States', style={'textAlign': 'center', 'color': 'green'}),
                 html.Label("Select States"),
                 dcc.Dropdown(
                         id='state-dropdown',
-                        style={'height': '30px', 'width': '300px'},
+                        style={'height': '30px', 'width': '500px'},
                         options=[{'label': s, 'value': s} for s in states_df['State'].unique()],
                         multi=True,
                         value=[],  # Default value empty list
@@ -199,7 +199,7 @@ app.layout = dbc.Container([
                 html.Label("Select Question"),
                 dcc.Dropdown(
                         id='question-dropdown-state',
-                        style={'height': '30px', 'width': '300px'},
+                        style={'height': '30px', 'width': '500px'},
                         options=[
                             {'label': 'Intend to use AI next 6 months', 'value': 'Intend'},
                             {'label': 'Used AI last 2 weeks', 'value': 'Used'}
@@ -216,18 +216,18 @@ app.layout = dbc.Container([
                             {'label': 'Do not know', 'value': 'Do not know'}
                     ],
                 value=[],
-                inline=True,
-                style={'padding-left': '10px','padding-right': '10px'}
+                inline=False,
+                labelClassName="mr-50"
                 ),
                 dcc.Graph(id='states-plot', figure={})  # Initialize with empty figure
         ], xs=12, sm=12, md=12, lg=5, xl=5, width={'size': 5, 'offset':0, 'order': 1}, className='p-2'),
 
         dbc.Col([
-                html.H4(children='AI Use across Industries and Firm Sizes', style={'textAlign': 'center', 'color': 'green'}),
+                html.H4(children='Industries and Firm Sizes', style={'textAlign': 'center', 'color': 'green'}),
                 html.Label("Select Industry"),
                 dcc.Dropdown(
                             id='industry-dropdown',
-                            style={'height': '30px', 'width': '300px'},
+                            style={'height': '30px', 'width': '500px'},
                             options=[{'label': industry, 'value': industry} for industry in sector_empl['industry'].unique()],
                             value=[],  # No initial value
                             ),
@@ -235,7 +235,7 @@ app.layout = dbc.Container([
                 html.Label("Select Question"),
                 dcc.Dropdown(
                             id='question-dropdown-sector',
-                            style={'height': '30px', 'width': '300px'},
+                            style={'height': '30px', 'width': '500px'},
                             options=[{'label': question, 'value': question} for question in sector_empl['question'].unique()],
                             value=[],
                             ),
@@ -249,12 +249,14 @@ app.layout = dbc.Container([
                                     {'label': 'Do not know', 'value': 'Do not know'}
                                     ],
                             value=[],  # No initial value
-                            inline=True,
-                            style={'padding-left': '10px', 'padding-right': '10px'}
+                            inline=False,
+                            labelClassName="mr-10"
                             ),
                 dcc.Graph(id='sector-empl-plot', figure={})
         ],  xs=12, sm=12, md=12, lg=5, xl=5, width={'size': 5,'offset': 0, 'order': 2}, className='p-2')
     ], justify='center')
+
+
 ])
 
 # Callback for the States plot
