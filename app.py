@@ -165,7 +165,7 @@ app.layout = dbc.Container([
     dbc.Row(
         dbc.Col(html.H1("National AI Adoption Tracker",
                         className='text-center text-primary mb-4'),
-                width=12)
+                        width=12)
     ),
 
     dbc.Row([
@@ -216,7 +216,8 @@ app.layout = dbc.Container([
                             {'label': 'Do not know', 'value': 'Do not know'}
                     ],
                 value=[],
-                inline=True
+                inline=True,
+                style={'padding-left': '10px','padding-right': '10px'}
                 ),
                 dcc.Graph(id='states-plot', figure={})  # Initialize with empty figure
         ], xs=12, sm=12, md=12, lg=5, xl=5, width={'size': 5, 'offset':0, 'order': 1}, className='p-2'),
@@ -248,11 +249,12 @@ app.layout = dbc.Container([
                                     {'label': 'Do not know', 'value': 'Do not know'}
                                     ],
                             value=[],  # No initial value
-                            inline=True
+                            inline=True,
+                            style={'padding-left': '10px', 'padding-right': '10px'}
                             ),
                 dcc.Graph(id='sector-empl-plot', figure={})
         ],  xs=12, sm=12, md=12, lg=5, xl=5, width={'size': 5,'offset': 0, 'order': 2}, className='p-2')
-    ])
+    ], justify='center')
 ])
 
 # Callback for the States plot
@@ -261,9 +263,9 @@ app.layout = dbc.Container([
     Output('states-plot', 'figure'),
     [Input('state-dropdown', 'value'),
      Input('question-dropdown-state', 'value'),
-     Input('answer-checkbox-sector', 'value')]
+     Input('answer-checkbox-state', 'value')]
      )
-def update_plot(selected_states, selected_question, selected_answers):
+def update_states_plot(selected_states, selected_question, selected_answers):
     # If any selection is missing, return empty figure
     if not (selected_states and selected_question and selected_answers):
         return {}
@@ -281,8 +283,8 @@ def update_plot(selected_states, selected_question, selected_answers):
     median_value = filtered_df['percentage'].median()
 
     fig = px.line(filtered_df, x='end_date', y='percentage', color='State',
-                  title='Percentage of Firms Using AI in creating products and services', color_discrete_sequence=px.colors.qualitative.Light24,
-                  width=800, height=400,
+                  title='', color_discrete_sequence=px.colors.qualitative.Light24,
+                  width=500, height=400,
                   template='plotly_white', labels={'percentage': 'Percentage',
                                                    'end_date': 'Month/Year',
                                                    'State': 'States'})
@@ -312,7 +314,7 @@ def update_plot(selected_states, selected_question, selected_answers):
      Input('question-dropdown-sector', 'value'),
      Input('answer-checkbox-sector', 'value')]
 )
-def update_plot(selected_industry, selected_question, selected_answers):
+def update_sector_plot(selected_industry, selected_question, selected_answers):
     # If any selection is missing, return an empty figure
     if not (selected_industry and selected_question and selected_answers):
         return {}
@@ -337,10 +339,10 @@ def update_plot(selected_industry, selected_question, selected_answers):
 
     # Create the line plot
     fig = px.line(filtered_df, x='end_date', y='percentage', color='emp_size', color_discrete_sequence=px.colors.qualitative.Light24,
-                  title='Percentage of Firms Using AI',
+                  title='',
                   labels={'percentage': 'Percentage', 'end_date': 'Month/Year', 'emp_size': 'Firm Size'},
                   template='plotly_white',
-                  width=800, height=400,)
+                  width=500, height=400,)
     fig.update_xaxes(
         tickvals=filtered_df['end_date'].unique(),
         tickformat= '%b %Y'
