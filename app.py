@@ -253,7 +253,7 @@ app.layout = dbc.Container([
     ], justify='center'),
 
     dbc.Row([
-        dbc.Col(html.Img(src="C:\\Users\ormal\\Documents\\ai_tracker\\dashboard\\assets\\aatiny.jpg", height="50px"), width=1),
+        dbc.Col(html.Img(src="/assets/aatiny.jpg", height="50px"), width=2),
         dbc.Col(html.P("Omar Malik\nOsama Kidwai\n@Azra Analytics", className="text-primary text-success text-right", style={'white-space': 'pre-line'}), width=10),
                 ], justify="end", align="center", style={"position": "fixed", "bottom": 10, "right": 10, "zIndex": 999})
 
