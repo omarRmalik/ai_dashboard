@@ -187,24 +187,22 @@ app.layout = dbc.Container([
     dbc.Row([
         dbc.Col([
                 html.H4(children='US States', className='text-center text-success mb-4'),
-                html.Label("Select States"),
                 dcc.Dropdown(
-                        id='state-dropdown',
+                        id='state-dropdown', placeholder='Select US states',
                         style={'height': '20px', 'width': '500px'},
                         options=[{'label': s, 'value': s} for s in states_df['State'].unique()],
                         multi=True,
-                        value=[],  # Default value empty list
+                        className='p-1'
                 ),
-                html.Br(),  # Adding space
-                html.Label("Select Question"),
+                html.Div(style={'height': '100px'}),  # Adding space
                 dcc.Dropdown(
-                        id='question-dropdown-state',
+                        id='question-dropdown-state', placeholder='Select a question',
                         style={'height': '20px', 'width': '500px'},
                         options=[
                             {'label': 'Intend to use AI next 6 months', 'value': 'Intend'},
                             {'label': 'Used AI last 2 weeks', 'value': 'Used'}
                         ],
-                        value='None',  # Default value is None
+                        className='p-1'
                 ),
                 html.Br(),  # Adding space
                 html.Label("Select One Answer Choice"),
@@ -216,28 +214,26 @@ app.layout = dbc.Container([
                             {'label': 'Do not know', 'value': 'Do not know'}
                     ],
                 value=[],
-                inline=False,
-                labelClassName="mr-50"
+                inline=True,
+                labelClassName="p-1"
                 ),
                 dcc.Graph(id='states-plot', figure={})  # Initialize with empty figure
         ], xs=12, sm=12, md=12, lg=5, xl=5, width={'size': 5, 'offset':0, 'order': 1}, className='p-2'),
 
         dbc.Col([
                 html.H4(children='Industries and Firm Sizes', className='text-center text-success mb-4'),
-                html.Label("Select Industry"),
                 dcc.Dropdown(
-                            id='industry-dropdown',
+                            id='industry-dropdown', placeholder= "Select an industry",
                             style={'height': '20px', 'width': '500px'},
                             options=[{'label': industry, 'value': industry} for industry in sector_empl['industry'].unique()],
-                            value=[]
+                            className='p-1'
                             ),
                 html.Br(),
-                html.Label("Select Question"),
                 dcc.Dropdown(
-                            id='question-dropdown-sector',
+                            id='question-dropdown-sector', placeholder='Select a question',
                             style={'height': '20px', 'width': '500px'},
                             options=[{'label': question, 'value': question} for question in sector_empl['question'].unique()],
-                            value=[]
+                            className='p-1'
                             ),
                 html.Br(),
                 html.Label("Select One Answer Choice"),
@@ -249,8 +245,8 @@ app.layout = dbc.Container([
                                     {'label': 'Do not know', 'value': 'Do not know'}
                                     ],
                             value=[],  # No initial value
-                            inline=False,
-                            labelClassName="mr-10"
+                            inline=True,
+                            labelClassName="p-1"
                             ),
                 dcc.Graph(id='sector-empl-plot', figure={})
         ],  xs=12, sm=12, md=12, lg=5, xl=5, width={'size': 5,'offset': 0, 'order': 2}, className='p-2')
