@@ -253,7 +253,7 @@ app.layout = dbc.Container([
     ], justify='center'),
 
     dbc.Row([
-        dbc.Col(html.P("Omar Malik & Osama Kidwai\n @Azra Analytics", className="text-primary text-success text-right"), width=10),
+        dbc.Col(html.P("Omar Malik\nOsama Kidwai\n@Azra Analytics", className="text-primary text-success text-right", style={'white-space': 'pre-line'}), width=10),
                 ], justify="end", align="center", style={"position": "fixed", "bottom": 10, "right": 10, "zIndex": 999})
 
 ], fluid=True)
