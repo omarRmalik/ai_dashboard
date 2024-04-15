@@ -105,7 +105,7 @@ sector_empl = pd.read_excel('https://www.census.gov/hfp/btos/downloads/Sector%20
 
 # naics_codes
 
-naics_codes = pd.read_excel("C:\\Users\\ormal\\Downloads\\2022_NAICS_Descriptions.xlsx")
+naics_codes = pd.read_excel('https://www.census.gov/naics/2022NAICS/2022_NAICS_Descriptions.xlsx')
 
 # naics codes cleanup
 
@@ -186,7 +186,7 @@ app.layout = dbc.Container([
 
     dbc.Row([
         dbc.Col([
-                html.H4(children='US States', className='text-center text-success mb-4'),
+                html.H4(children='US States', className='text-left text-success mb-4'),
                 dcc.Dropdown(
                         id='state-dropdown', placeholder='Select US states',
                         style={'height': '20px', 'width': '500px'},
@@ -221,14 +221,14 @@ app.layout = dbc.Container([
         ], xs=12, sm=12, md=12, lg=5, xl=5, width={'size': 5, 'offset':0, 'order': 1}, className='p-2'),
 
         dbc.Col([
-                html.H4(children='Industries and Firm Sizes', className='text-center text-success mb-4'),
+                html.H4(children='Industries and Firm Sizes', className='text-left text-success mb-4'),
                 dcc.Dropdown(
                             id='industry-dropdown', placeholder= "Select an industry",
                             style={'height': '20px', 'width': '500px'},
                             options=[{'label': industry, 'value': industry} for industry in sector_empl['industry'].unique()],
                             className='p-1'
                             ),
-                html.Br(),
+                html.Div(style={'height': '100px'}),
                 dcc.Dropdown(
                             id='question-dropdown-sector', placeholder='Select a question',
                             style={'height': '20px', 'width': '500px'},
@@ -256,7 +256,7 @@ app.layout = dbc.Container([
         dbc.Col(html.P("Omar Malik & Osama Kidwai\n @Azra Analytics", className="text-primary text-success text-right"), width=10),
                 ], justify="end", align="center", style={"position": "fixed", "bottom": 10, "right": 10, "zIndex": 999})
 
-])
+], fluid=True)
 
 # Callback for the States plot
 
