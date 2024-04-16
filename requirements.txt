@@ -4,5 +4,6 @@ dash-core-components==2.0.0
 dash-html-components==2.0.0
 plotly==5.20.0
 plotly-express
+openpyxl==3.1.2
 pandas
 gunicorn
