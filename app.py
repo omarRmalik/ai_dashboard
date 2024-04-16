@@ -253,9 +253,9 @@ app.layout = dbc.Container([
     ], justify='center'),
 
     dbc.Row([
-        dbc.Col(html.Img(src="/assets/aatiny.jpg", height="50px"), width=2),
-        dbc.Col(html.P("Omar Malik\nOsama Kidwai\n@Azra Analytics", className="text-primary text-success text-right", style={'white-space': 'pre-line'}), width=10),
-                ], justify="end", align="center", style={"position": "fixed", "bottom": 10, "right": 10, "zIndex": 999})
+        dbc.Col(html.Img(src="/assets/aatiny.jpg", style={'marginRight': '50px'}, height="50px"), width=2),
+
+    ], justify="start", align="left", style={"position": "fixed", "bottom": 8, "right": 8, "zIndex": 999})
 
 ], fluid=True)
 
@@ -389,4 +389,4 @@ def update_checklist_value(selected_values):
     return selected_values
 
 if __name__=='__main__':
-    app.run_server(debug=True, port=8000)
+    app.run_server(port=8000)
