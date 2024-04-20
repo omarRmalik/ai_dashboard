@@ -3,7 +3,9 @@ from dash import dcc, html
 from dash.dependencies import Output, Input
 import plotly.express as px
 import dash_bootstrap_components as dbc
+from dash_extensions.enrich import DashProxy, html, Output, Input, dcc
 import pandas as pd
+import flask
 
 # National data
 
@@ -252,10 +254,18 @@ app.layout = dbc.Container([
         ],  xs=12, sm=12, md=12, lg=5, xl=5, width={'size': 5,'offset': 0, 'order': 2}, className='p-2')
     ], justify='center'),
 
+    html.Div([
     dbc.Row([
-        dbc.Col(html.Img(src="/assets/aatiny.jpg", style={'marginRight': '50px'}, height="50px"), width=2),
+        dbc.Col(html.Button('Data Details PDF', id='btn-pdf',className='btn btn-success'), width=6, style={'textAlign': 'left'}),
+        dbc.Col(html.Img(src="/assets/aatiny.jpg", style={'marginRight': '50px'}, height="50px"), width=6, style={'textAlign': 'right'}),
+    ], style={"position": "fixed", "bottom": 8, "left": 8, "right": 8, "zIndex": 999}),
+    dcc.Download(id='download-link'),
+    ])
 
-    ], justify="start", align="left", style={"position": "fixed", "bottom": 8, "right": 8, "zIndex": 999})
+    # dbc.Row([
+    #     dbc.Col(html.Img(src="/assets/aatiny.jpg", style={'marginRight': '50px'}, height="50px"), width=2),
+    #
+    # ], justify="start", align="left", style={"position": "fixed", "bottom": 8, "right": 8, "zIndex": 999})
 
 ], fluid=True)
 
@@ -368,6 +378,8 @@ def update_sector_plot(selected_industry, selected_question, selected_answers):
 
     return fig
 
+# Callback for Checklist
+
 @app.callback(
     Output('answer-checkbox-state', 'value'),
     [Input('answer-checkbox-state', 'value')]
@@ -388,5 +400,17 @@ def update_checklist_value(selected_values):
         return [selected_values[-1]]
     return selected_values
 
+# Download PDF
+
+@app.callback(
+    Output('download-link', 'data'),
+    Input('btn-pdf', 'n_clicks'),
+    prevent_initial_call=True
+)
+def trigger_download(n_clicks):
+    if n_clicks:
+        file_path = 'assets/BTOS_AI_Data_Description.pdf'
+        return dcc.send_file(file_path)
+
 if __name__=='__main__':
-    app.run_server(port=8000)
+    app.run_server(debug=True, port=8000)
