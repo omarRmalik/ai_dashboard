@@ -5,7 +5,6 @@ import plotly.express as px
 import dash_bootstrap_components as dbc
 from dash_extensions.enrich import DashProxy, html, Output, Input, dcc
 import pandas as pd
-import flask
 
 # National data
 
@@ -262,11 +261,6 @@ app.layout = dbc.Container([
     dcc.Download(id='download-link'),
     ])
 
-    # dbc.Row([
-    #     dbc.Col(html.Img(src="/assets/aatiny.jpg", style={'marginRight': '50px'}, height="50px"), width=2),
-    #
-    # ], justify="start", align="left", style={"position": "fixed", "bottom": 8, "right": 8, "zIndex": 999})
-
 ], fluid=True)
 
 # Callback for the States plot
@@ -413,4 +407,4 @@ def trigger_download(n_clicks):
         return dcc.send_file(file_path)
 
 if __name__=='__main__':
-    app.run_server(debug=True, port=8000)
+    app.run_server(port=8000)
