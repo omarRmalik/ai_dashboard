@@ -336,7 +336,7 @@ app.layout = dbc.Container([
         dbc.Col(html.P("AI is one of the transformative technologies of our times. "
                        "How US businesses adopt this technology is of utmost importance. "
                        "The US Census Bureau added supplemental content on AI to its Business Trends and Outlook Survey "
-                       "Asking if US businesses are using AI in creating products and services. The top two graphs show you "
+                       "asking if US businesses are using AI in creating products and services. The top two graphs show you "
                        "businesses responding Yes and No to the question of using AI. The bottom two graphs "
                        "allow you to explore the data by US states and by industry sectors and firm sizes." ,
                        className='text-primary'), width=12)
