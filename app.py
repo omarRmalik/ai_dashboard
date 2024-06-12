@@ -319,7 +319,7 @@ sector_empl = (
 
 # Instantiate the dash app
 
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.MINTY],
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.LITERA],
                 meta_tags=[{'name': 'viewport',
                             'content': 'width=device-width, initial-scale=1.0'}]
                 )
@@ -329,224 +329,18 @@ server = app.server
 # Layout of the dashboard
 
 app.layout = dbc.Container([
-
-    dbc.Row(
+    dbc.Row([
         dbc.Col(html.H1("National AI Adoption Tracker",
                         className='text-center text-success mb-4'),
-                        width=12)
-    ),
-
-    dbc.Row([
-
-        dbc.Col([
-           dcc.Graph(id='national-yes-fig', figure=fig_yes)
-        ], width={'size':6, 'offset':0, 'order':1},
-           xs=12, sm=12, md=12, lg=6, xl=6
-        ),
-
-        dbc.Col([
-           dcc.Graph(id='national-no-fig', figure=fig_no)
-        ], width={'size':6, 'offset':0, 'order':2},
-           xs=12, sm=12, md=12, lg=6, xl=6
-        ),
-
-    ], justify='center'),
-
-    dbc.Row([
-        dbc.Col([
-                html.H4(children='US States', className='text-left text-success mb-4'),
-                dcc.Dropdown(
-                        id='state-dropdown', placeholder='Select US states',
-                        style={'height': '20px', 'width': '500px'},
-                        options=[{'label': s, 'value': s} for s in states_df['State'].unique()],
-                        multi=True,
-                        className='p-1'
-                ),
-                html.Div(style={'height': '100px'}),  # Adding space
-                dcc.Dropdown(
-                        id='question-dropdown-state', placeholder='Select a question',
-                        style={'height': '20px', 'width': '500px'},
-                        options=[
-                            {'label': 'Intend to use AI next 6 months', 'value': 'Intend'},
-                            {'label': 'Used AI last 2 weeks', 'value': 'Used'}
-                        ],
-                        className='p-1'
-                ),
-                html.Br(),  # Adding space
-                html.Label("Select One Answer Choice"),
-                dcc.Checklist(
-                    id='answer-checkbox-state',
-                    options=[
-                            {'label': 'Yes', 'value': 'Yes'},
-                            {'label': 'No', 'value': 'No'},
-                            {'label': 'Do not know', 'value': 'Do not know'}
-                    ],
-                value=[],
-                inline=True,
-                labelClassName="p-1"
-                ),
-                dcc.Graph(id='states-plot', figure={})  # Initialize with empty figure
-        ], xs=12, sm=12, md=12, lg=6, xl=6, width={'size': 6, 'offset':0, 'order': 1}, className='p-2'),
-
-        dbc.Col([
-                html.H4(children='Industries and Firm Sizes', className='text-left text-success mb-4'),
-                dcc.Dropdown(
-                            id='industry-dropdown', placeholder= "Select an industry",
-                            style={'height': '20px', 'width': '500px'},
-                            options=[{'label': industry, 'value': industry} for industry in sector_empl['industry'].unique()],
-                            className='p-1'
-                            ),
-                html.Div(style={'height': '100px'}),
-                dcc.Dropdown(
-                            id='question-dropdown-sector', placeholder='Select a question',
-                            style={'height': '20px', 'width': '500px'},
-                            options=[{'label': question, 'value': question} for question in sector_empl['question'].unique()],
-                            className='p-1'
-                            ),
-                html.Br(),
-                html.Label("Select One Answer Choice"),
-                dcc.Checklist(
-                            id='answer-checkbox-sector',
-                            options= [
-                                    {'label': 'Yes', 'value': 'Yes'},
-                                    {'label': 'No', 'value': 'No'},
-                                    {'label': 'Do not know', 'value': 'Do not know'}
-                                    ],
-                            value=[],  # No initial value
-                            inline=True,
-                            labelClassName="p-1"
-                            ),
-                dcc.Graph(id='sector-empl-plot', figure={})
-        ],  xs=12, sm=12, md=12, lg=6, xl=6, width={'size': 6,'offset': 0, 'order': 2}, className='p-2')
+                width=12),
+        dbc.Col(html.P("AI is one of the transformative technologies of our times. "
+                       "How US businesses adopt this technology is of utmost importance. "
+                       "The US Census Bureau added supplemental content on AI to its Business Trends and Outlook Survey "
+                       "Asking if US businesses are using AI in creating products and services. The top two graphs show you "
+                       "businesses responding Yes and No to the question of using AI. The bottom two graphs "
+                       "allow you to explore the data by US states and by industry sectors and firm sizes." ,
+                       className='text-primary'), width=12)
     ]),
-
-    html.Div([
-    dbc.Row([
-        dbc.Col(html.Button('Data Details PDF', id='btn-pdf',className='btn btn-success'), width=6, style={'textAlign': 'left'}),
-        dbc.Col(html.Img(src="/assets/aatiny.jpg", style={'marginRight': '50px'}, height="50px"), width=6, style={'textAlign': 'right'}),
-    ], style={"position": "fixed", "bottom": 8, "left": 8, "right": 8, "zIndex": 999}),
-    dcc.Download(id='download-link'),
-    ])
-
-], fluid=True)
-
-# Callback for the States plot
-
-@app.callback(
-    Output('states-plot', 'figure'),
-    [Input('state-dropdown', 'value'),
-     Input('question-dropdown-state', 'value'),
-     Input('answer-checkbox-state', 'value')]
-     )
-def update_states_plot(selected_states, selected_question, selected_answers):
-    # If any selection is missing, return empty figure
-    if not (selected_states and selected_question and selected_answers):
-        return {}
-
-    # Filter DataFrame based on selections
-    filtered_df = states_df[(states_df['State'].isin(selected_states)) &
-                     (states_df['Question'].str.contains(selected_question)) &
-                     (states_df['Answer'].isin(selected_answers))]
-
-    # If no data after filtering, return empty figure
-    if filtered_df.empty:
-        return {}
-
-    # Calculate median for the selected data
-    median_value = filtered_df['percentage'].median()
-
-    fig = px.line(filtered_df, x='end_date', y='percentage', color='State',
-                  title='', color_discrete_sequence=px.colors.qualitative.Light24,
-                  width=500, height=400,
-                  template='plotly_white', labels={'percentage': 'Percentage',
-                                                   'end_date': 'Month/Year',
-                                                   'State': 'States'})
-    fig.update_traces(line=dict(width=3.5))
-
-    # Add dashed line representing median with annotation below the line
-    fig.add_shape(type='line',
-                  x0=filtered_df['end_date'].min(), y0=median_value,
-                  x1=filtered_df['end_date'].max(), y1=median_value,
-                  line=dict(color='red', width=2, dash='dash'),
-                  name='Median'
-                  )
-    fig.add_annotation(x=filtered_df['end_date'].max(), y=median_value - 0.5,
-                       xref="x", yref="y",
-                       text="National Median",
-                       showarrow=False,
-                       font=dict(family="Times New Roman", size=12, color="red")
-                       )
-
-    return fig
-
-# Callback for industry sector and firm size plot
-
-@app.callback(
-    Output('sector-empl-plot', 'figure'),
-    [Input('industry-dropdown', 'value'),
-     Input('question-dropdown-sector', 'value'),
-     Input('answer-checkbox-sector', 'value')]
-)
-def update_sector_plot(selected_industry, selected_question, selected_answers):
-    # If any selection is missing, return an empty figure
-    if not (selected_industry and selected_question and selected_answers):
-        return {}
-
-    # Convert single selected values to lists to match the logic in the filtering
-    if isinstance(selected_industry, str):
-        selected_industry = [selected_industry]
-    if isinstance(selected_question, str):
-        selected_question = [selected_question]
-    if isinstance(selected_answers, str):
-        selected_answers = [selected_answers]
-
-    # Filter DataFrame based on selections
-    filtered_df = sector_empl[(sector_empl['industry'].isin(selected_industry)) &
-                     (sector_empl['question'].isin(selected_question)) &
-                     (sector_empl['Answer'].isin(selected_answers))]
-
-    # If no data after filtering, return an empty figure
-    if filtered_df.empty:
-        return {}
-    median_value = filtered_df['percentage'].median()
-
-    # Create the line plot
-    fig = px.line(filtered_df, x='end_date', y='percentage', color='emp_size', color_discrete_sequence=px.colors.qualitative.Light24,
-                  title='',
-                  labels={'percentage': 'Percentage', 'end_date': 'Month/Year', 'emp_size': 'Firm Size'},
-                  template='plotly_white',
-                  width=500, height=400,)
-    fig.update_xaxes(
-        tickvals=filtered_df['end_date'].unique(),
-        tickformat= '%b %Y'
-    )
-
-    fig.update_traces(line=dict(width=3.5))
-
-    # Add dashed line representing median with annotation below the line
-    fig.add_shape(type='line',
-                  x0=filtered_df['end_date'].min(), y0=median_value,
-                  x1=filtered_df['end_date'].max(), y1=median_value,
-                  line=dict(color='red', width=2, dash='dash'),
-                  name='Median'
-                  )
-    fig.add_annotation(x=filtered_df['end_date'].max(), y=median_value - 0.5,
-                       xref="x", yref="y",
-                       text="National Median",
-                       showarrow=False,
-                       font=dict(family="Times New Roman", size=12, color="red")
-                       )
-
-    return fig
-
-# Layout of the dashboard
-
-app.layout = dbc.Container([
-    dbc.Row(
-        dbc.Col(html.H1("National AI Adoption Tracker",
-                        className='text-center text-success mb-4'),
-                width=12)
-    ),
 
     dbc.Row([
         dbc.Col([
@@ -657,6 +451,114 @@ app.layout = dbc.Container([
     ])
 ], fluid=True)
 
+# Callback for the States plot
+
+@app.callback(
+    Output('states-plot', 'figure'),
+    [Input('state-dropdown', 'value'),
+     Input('question-dropdown-state', 'value'),
+     Input('answer-checkbox-state', 'value')]
+     )
+def update_states_plot(selected_states, selected_question, selected_answers):
+    # If any selection is missing, return empty figure
+    if not (selected_states and selected_question and selected_answers):
+        return {}
+
+    # Filter DataFrame based on selections
+    filtered_df = states_df[(states_df['State'].isin(selected_states)) &
+                     (states_df['Question'].str.contains(selected_question)) &
+                     (states_df['Answer'].isin(selected_answers))]
+
+    # If no data after filtering, return empty figure
+    if filtered_df.empty:
+        return {}
+
+    # Calculate median for the selected data
+    median_value = filtered_df['percentage'].median()
+
+    fig = px.line(filtered_df, x='end_date', y='percentage', color='State',
+                  title='', color_discrete_sequence=px.colors.qualitative.Light24,
+                  width=500, height=400,
+                  template='plotly_white', labels={'percentage': 'Percentage',
+                                                   'end_date': 'Month/Year',
+                                                   'State': 'States'})
+    fig.update_traces(line=dict(width=3.5))
+
+    # Add dashed line representing median with annotation below the line
+    fig.add_shape(type='line',
+                  x0=filtered_df['end_date'].min(), y0=median_value,
+                  x1=filtered_df['end_date'].max(), y1=median_value,
+                  line=dict(color='red', width=2, dash='dash'),
+                  name='Median'
+                  )
+    fig.add_annotation(x=filtered_df['end_date'].max(), y=median_value - 0.5,
+                       xref="x", yref="y",
+                       text="National Median",
+                       showarrow=False,
+                       font=dict(family="Times New Roman", size=12, color="red")
+                       )
+
+    return fig
+
+# Callback for industry sector and firm size plot
+
+@app.callback(
+    Output('sector-empl-plot', 'figure'),
+    [Input('industry-dropdown', 'value'),
+     Input('question-dropdown-sector', 'value'),
+     Input('answer-checkbox-sector', 'value')]
+)
+def update_sector_plot(selected_industry, selected_question, selected_answers):
+    # If any selection is missing, return an empty figure
+    if not (selected_industry and selected_question and selected_answers):
+        return {}
+
+    # Convert single selected values to lists to match the logic in the filtering
+    if isinstance(selected_industry, str):
+        selected_industry = [selected_industry]
+    if isinstance(selected_question, str):
+        selected_question = [selected_question]
+    if isinstance(selected_answers, str):
+        selected_answers = [selected_answers]
+
+    # Filter DataFrame based on selections
+    filtered_df = sector_empl[(sector_empl['industry'].isin(selected_industry)) &
+                     (sector_empl['question'].isin(selected_question)) &
+                     (sector_empl['Answer'].isin(selected_answers))]
+
+    # If no data after filtering, return an empty figure
+    if filtered_df.empty:
+        return {}
+    median_value = filtered_df['percentage'].median()
+
+    # Create the line plot
+    fig = px.line(filtered_df, x='end_date', y='percentage', color='emp_size', color_discrete_sequence=px.colors.qualitative.Light24,
+                  title='',
+                  labels={'percentage': 'Percentage', 'end_date': 'Month/Year', 'emp_size': 'Firm Size'},
+                  template='plotly_white',
+                  width=500, height=400,)
+    fig.update_xaxes(
+        tickvals=filtered_df['end_date'].unique(),
+        tickformat= '%b %Y'
+    )
+
+    fig.update_traces(line=dict(width=3.5))
+
+    # Add dashed line representing median with annotation below the line
+    fig.add_shape(type='line',
+                  x0=filtered_df['end_date'].min(), y0=median_value,
+                  x1=filtered_df['end_date'].max(), y1=median_value,
+                  line=dict(color='red', width=2, dash='dash'),
+                  name='Median'
+                  )
+    fig.add_annotation(x=filtered_df['end_date'].max(), y=median_value - 0.5,
+                       xref="x", yref="y",
+                       text="National Median",
+                       showarrow=False,
+                       font=dict(family="Times New Roman", size=12, color="red")
+                       )
+
+    return fig
 
 # Callback for Checklist
 
