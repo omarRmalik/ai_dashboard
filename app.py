@@ -1,3 +1,4 @@
+import os
 import dash
 from dash import dcc, html
 from dash.dependencies import Output, Input
@@ -434,6 +435,6 @@ def trigger_download(n_clicks):
         file_path = 'assets/BTOS_AI_Data_Description.pdf'
         return dcc.send_file(file_path)
 
-if __name__=='__main__':
-    app.run_server(port=8000)
-# Callback for the States plot
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 8050))
+    app.run_server(host="0.0.0.0", port=port)
