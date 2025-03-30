@@ -111,7 +111,7 @@ sector_empl = pd.read_excel('https://www.census.gov/hfp/btos/downloads/Sector%20
 
 # naics_codes
 
-naics_codes = pd.read_excel('https://www.census.gov/naics/2022NAICS/2022_NAICS_Descriptions.xlsx')
+naics_codes = pd.read_excel('assets/2022_NAICS_Descriptions (6).xlsx')
 
 # naics codes cleanup
 
