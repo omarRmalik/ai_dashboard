@@ -841,11 +841,7 @@ app.layout = dbc.Container([
 )
 def update_choropleth(question, answer, aggregation):
     """Update choropleth map showing aggregated data across all available periods (2023-2025)."""
-    logger.info(f"update_choropleth called: question={question}, answer={answer}, aggregation={aggregation}")
-    logger.info(f"states_df shape: {states_df.shape if not states_df.empty else 'EMPTY'}")
-
     if not all([question, answer, aggregation]) or states_df.empty:
-        logger.warning("Returning empty figure - missing inputs or empty states_df")
         return create_empty_figure("Select options to view the map"), " (Select options above)"
 
     # Filter by question and answer - use all data from 2023-2025
@@ -854,13 +850,7 @@ def update_choropleth(question, answer, aggregation):
         (states_df["Answer"] == answer)
     ].copy()
 
-    logger.info(f"After filtering: map_df has {len(map_df)} rows")
-    if not map_df.empty:
-        logger.info(f"Date range: {map_df['end_date'].min()} to {map_df['end_date'].max()}")
-        logger.info(f"Unique states: {map_df['State'].nunique()}")
-
     if map_df.empty:
-        logger.warning("map_df is empty after filtering")
         return create_empty_figure("No data available for selection"), " (No data available)"
 
     # Get date range for subtitle
@@ -896,14 +886,22 @@ def update_choropleth(question, answer, aggregation):
         )
 
     # State column already contains state codes (e.g., 'AL', 'CA')
-    # Red to Yellow color scale (low values = red, high values = yellow)
+    # Pastel color scale with fixed range (0-100%) for consistency across aggregation types
+    # Low values = light pink/salmon, High values = light teal/mint
     fig = px.choropleth(
         map_df,
         locations="State",
         locationmode="USA-states",
         color="percentage",
         scope="usa",
-        color_continuous_scale=[[0, "red"], [0.5, "orange"], [1, "yellow"]],
+        color_continuous_scale=[
+            [0, "#FFE4E1"],      # Misty rose (light pink)
+            [0.25, "#FFDAB9"],   # Peach puff
+            [0.5, "#E0FFFF"],    # Light cyan
+            [0.75, "#B2DFDB"],   # Light teal
+            [1, "#80CBC4"]       # Medium teal
+        ],
+        range_color=[0, 40],    # Fixed range (0-40%) to show color variation in actual data range
         labels={"percentage": "% of Firms", "State": "State"},
         hover_data={"percentage": ":.1f"}
     )
@@ -1077,4 +1075,4 @@ def trigger_download(n_clicks):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8050))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=port, debug=False)
