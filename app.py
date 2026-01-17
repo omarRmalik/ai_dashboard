@@ -895,19 +895,17 @@ def update_choropleth(question, answer, aggregation):
             .reset_index()
         )
 
-    map_df["state_code"] = map_df["State"].map(STATE_CODES)
-
+    # State column already contains state codes (e.g., 'AL', 'CA')
     # Red to Yellow color scale (low values = red, high values = yellow)
     fig = px.choropleth(
         map_df,
-        locations="state_code",
+        locations="State",
         locationmode="USA-states",
         color="percentage",
         scope="usa",
         color_continuous_scale=[[0, "red"], [0.5, "orange"], [1, "yellow"]],
-        labels={"percentage": "% of Firms"},
-        hover_name="State",
-        hover_data={"state_code": False, "percentage": ":.1f"}
+        labels={"percentage": "% of Firms", "State": "State"},
+        hover_data={"percentage": ":.1f"}
     )
 
     fig.update_layout(
@@ -1079,4 +1077,4 @@ def trigger_download(n_clicks):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8050))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port, debug=True)
