@@ -653,7 +653,7 @@ app.layout = dbc.Container([
             dbc.Card([
                 dbc.CardHeader([
                     html.H4("AI Adoption by State", className="d-inline"),
-                    html.Small(" (Average across all available periods)", className="text-muted ms-2")
+                    html.Small(id="map-subtitle", children=" (Mean across all available periods)", className="text-muted ms-2")
                 ]),
                 dbc.CardBody([
                     dbc.Row([
@@ -668,7 +668,20 @@ app.layout = dbc.Container([
                                 value="Used",
                                 className="mb-2"
                             ),
-                        ], md=6),
+                        ], md=4),
+                        dbc.Col([
+                            dcc.Dropdown(
+                                id="map-aggregation-dropdown",
+                                placeholder="Select aggregation",
+                                options=[
+                                    {"label": "Mean", "value": "mean"},
+                                    {"label": "Median", "value": "median"},
+                                    {"label": "Max", "value": "max"}
+                                ],
+                                value="mean",
+                                className="mb-2"
+                            ),
+                        ], md=4),
                         dbc.Col([
                             dbc.RadioItems(
                                 id="map-answer-radio",
@@ -680,7 +693,7 @@ app.layout = dbc.Container([
                                 inline=True,
                                 className="mt-2"
                             )
-                        ], md=6),
+                        ], md=4),
                     ]),
                     dcc.Loading(
                         type="circle",
@@ -815,42 +828,68 @@ def update_map_date_options(_question):
 
 
 @app.callback(
-    Output("choropleth-map", "figure"),
+    [Output("choropleth-map", "figure"),
+     Output("map-subtitle", "children")],
     [Input("map-question-dropdown", "value"),
-     Input("map-answer-radio", "value")]
+     Input("map-answer-radio", "value"),
+     Input("map-aggregation-dropdown", "value")]
 )
-def update_choropleth(question, answer):
-    """Update choropleth map showing average across all available periods."""
-    if not all([question, answer]) or states_df.empty:
-        return create_empty_figure("Select options to view the map")
+def update_choropleth(question, answer, aggregation):
+    """Update choropleth map showing aggregated data across all available periods (2023-2025)."""
+    if not all([question, answer, aggregation]) or states_df.empty:
+        return create_empty_figure("Select options to view the map"), " (Select options above)"
 
-    # Filter by question and answer, then average across all dates
+    # Filter by question and answer - use all data from 2023-2025
     map_df = states_df[
         (states_df["Question"].str.contains(question, na=False)) &
         (states_df["Answer"] == answer)
     ].copy()
 
     if map_df.empty:
-        return create_empty_figure("No data available for selection")
+        return create_empty_figure("No data available for selection"), " (No data available)"
 
-    # Calculate average percentage per state across all time periods
-    map_df = (
-        map_df
-        .groupby("State")["percentage"]
-        .mean()
-        .round(1)
-        .reset_index()
-    )
+    # Get date range for subtitle
+    date_min = map_df["end_date"].min()
+    date_max = map_df["end_date"].max()
+    date_range_str = f"{date_min.strftime('%b %Y')} - {date_max.strftime('%b %Y')}" if pd.notna(date_min) and pd.notna(date_max) else "all periods"
+
+    # Calculate aggregated percentage per state across all time periods
+    agg_label = aggregation.capitalize()
+    if aggregation == "mean":
+        map_df = (
+            map_df
+            .groupby("State")["percentage"]
+            .mean()
+            .round(1)
+            .reset_index()
+        )
+    elif aggregation == "median":
+        map_df = (
+            map_df
+            .groupby("State")["percentage"]
+            .median()
+            .round(1)
+            .reset_index()
+        )
+    elif aggregation == "max":
+        map_df = (
+            map_df
+            .groupby("State")["percentage"]
+            .max()
+            .round(1)
+            .reset_index()
+        )
 
     map_df["state_code"] = map_df["State"].map(STATE_CODES)
 
+    # Red to Yellow color scale (low values = red, high values = yellow)
     fig = px.choropleth(
         map_df,
         locations="state_code",
         locationmode="USA-states",
         color="percentage",
         scope="usa",
-        color_continuous_scale="Blues",
+        color_continuous_scale=[[0, "red"], [0.5, "orange"], [1, "yellow"]],
         labels={"percentage": "% of Firms"},
         hover_name="State",
         hover_data={"state_code": False, "percentage": ":.1f"}
@@ -863,7 +902,8 @@ def update_choropleth(question, answer):
         height=450
     )
 
-    return fig
+    subtitle = f" ({agg_label} across {date_range_str})"
+    return fig, subtitle
 
 
 @app.callback(
