@@ -538,6 +538,16 @@ if not ai_df.empty:
 else:
     DATA_DATE_RANGE = "No data available"
 
+# Startup logging for debugging
+logger.info(f"=== DATA LOAD SUMMARY ===")
+logger.info(f"ai_df: {len(ai_df)} rows")
+logger.info(f"states_df: {len(states_df)} rows")
+logger.info(f"sector_empl: {len(sector_empl)} rows")
+if not states_df.empty:
+    logger.info(f"states_df Questions: {states_df['Question'].unique().tolist()}")
+    logger.info(f"states_df date range: {states_df['end_date'].min()} to {states_df['end_date'].max()}")
+    logger.info(f"states_df unique states: {states_df['State'].nunique()}")
+
 # =============================================================================
 # SECTION 7: FIGURE CREATION FUNCTIONS
 # =============================================================================
@@ -831,7 +841,11 @@ app.layout = dbc.Container([
 )
 def update_choropleth(question, answer, aggregation):
     """Update choropleth map showing aggregated data across all available periods (2023-2025)."""
+    logger.info(f"update_choropleth called: question={question}, answer={answer}, aggregation={aggregation}")
+    logger.info(f"states_df shape: {states_df.shape if not states_df.empty else 'EMPTY'}")
+
     if not all([question, answer, aggregation]) or states_df.empty:
+        logger.warning("Returning empty figure - missing inputs or empty states_df")
         return create_empty_figure("Select options to view the map"), " (Select options above)"
 
     # Filter by question and answer - use all data from 2023-2025
@@ -840,7 +854,13 @@ def update_choropleth(question, answer, aggregation):
         (states_df["Answer"] == answer)
     ].copy()
 
+    logger.info(f"After filtering: map_df has {len(map_df)} rows")
+    if not map_df.empty:
+        logger.info(f"Date range: {map_df['end_date'].min()} to {map_df['end_date'].max()}")
+        logger.info(f"Unique states: {map_df['State'].nunique()}")
+
     if map_df.empty:
+        logger.warning("map_df is empty after filtering")
         return create_empty_figure("No data available for selection"), " (No data available)"
 
     # Get date range for subtitle
