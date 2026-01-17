@@ -1,187 +1,625 @@
+# =============================================================================
+# SECTION 1: IMPORTS AND CONFIGURATION
+# =============================================================================
 import os
+import io
+import logging
+import urllib.request
+
 import dash
 from dash import dcc, html
 from dash.dependencies import Output, Input
+
 import plotly.express as px
+import plotly.graph_objects as go
+
 import dash_bootstrap_components as dbc
 import pandas as pd
+from flask_caching import Cache
 
-# National data
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-df = pd.read_excel('https://www.census.gov/hfp/btos/downloads/National.xlsx')
+# =============================================================================
+# SECTION 2: CONFIGURATION MAPPINGS
+# =============================================================================
 
-# Clean national data
+# Firm size mapping
+LABEL_TO_SIZE = {
+    "A": "Small", "B": "Small", "C": "Small", "D": "Small",
+    "E": "Medium", "F": "Medium",
+    "G": "Large"
+}
 
-ai_map = {'In the last two weeks, did this business use Artificial Intelligence (AI) in producing goods or services? '
-          '(Examples of AI: machine learning, natural language processing, virtual agents, voice recognition, etc.)':'Used AI last 2 weeks',
-          'During the next six months, do you think this business will be using Artificial Intelligence (AI) in producing goods or services? '
-          '(Examples of AI: machine learning, natural language processing, virtual agents, voice recognition, etc.)': 'Intend to use AI next 6 months'}
+# State name to abbreviation mapping for choropleth
+STATE_CODES = {
+    'Alabama': 'AL', 'Alaska': 'AK', 'Arizona': 'AZ', 'Arkansas': 'AR', 'California': 'CA',
+    'Colorado': 'CO', 'Connecticut': 'CT', 'Delaware': 'DE', 'Florida': 'FL', 'Georgia': 'GA',
+    'Hawaii': 'HI', 'Idaho': 'ID', 'Illinois': 'IL', 'Indiana': 'IN', 'Iowa': 'IA',
+    'Kansas': 'KS', 'Kentucky': 'KY', 'Louisiana': 'LA', 'Maine': 'ME', 'Maryland': 'MD',
+    'Massachusetts': 'MA', 'Michigan': 'MI', 'Minnesota': 'MN', 'Mississippi': 'MS', 'Missouri': 'MO',
+    'Montana': 'MT', 'Nebraska': 'NE', 'Nevada': 'NV', 'New Hampshire': 'NH', 'New Jersey': 'NJ',
+    'New Mexico': 'NM', 'New York': 'NY', 'North Carolina': 'NC', 'North Dakota': 'ND', 'Ohio': 'OH',
+    'Oklahoma': 'OK', 'Oregon': 'OR', 'Pennsylvania': 'PA', 'Rhode Island': 'RI', 'South Carolina': 'SC',
+    'South Dakota': 'SD', 'Tennessee': 'TN', 'Texas': 'TX', 'Utah': 'UT', 'Vermont': 'VT',
+    'Virginia': 'VA', 'Washington': 'WA', 'West Virginia': 'WV', 'Wisconsin': 'WI', 'Wyoming': 'WY',
+    'District of Columbia': 'DC'
+}
 
-dates_map = {'202319': '09/10/2023', '202320': '09/24/2023', '202321':'10/08/2023', '202322': '10/22/2023', '202323':'11/05/2023','202324':'11/19/2023',
-             '202325':'12/03/2023','202326': '12/17/2023','202401':'12/31/2023','202402':'01/14/2024','202403':'01/28/2024','202404':'02/11/2024',
-             '202405': '02/25/2024', '202406': '03/10/2024','202407': '03/24/2024', '202408': '04/07/2024', '202409': '04/21/2024',
-             '202410': '05/05/2024', '202411':'05/19/2024', '202412':'06/02/2024', '202413': '06/16/2024', '202414': '06/30/2024',
-             '202415': '07/14/2024', '202416': '07/28/2024', '202417': '08/11/2024', '202418': '08/25/2024', '202419':	'09/8/2024',
-             '202420': '09/22/2024', '202421': '10/6/2024', '202422':	'10/20/2024','202423':'11/3/2024','202424': '11/17/2024', '202425': '12/1/2024',
-             '202426': '12/15/2024', '202501': '12/29/2024', '202502': '01/12/2025', '202503': '01/26/2025', '202504': '02/9/2025', '202505': '02/23/2025',
-             '202506': '03/9/2025', '202507': '03/23/2025', '202508':	'04/6/2025','202509': '04/20/2025', '202510': '05/4/2025', '202511': '05/18/2025',
-             '202512': '06/1/2025', '202513': '06/15/2025', '202514': '06/29/2025', '202515':'07/13/2025', '202516': '07/27/2025', '202517': '08/10/2025',
-             '202518': '08/24/2025', '202519':'09/07/2025', '202520': '09/21/2025', '202521': '10/05/2025'}
+# =============================================================================
+# SECTION 2.5: BTOS PERIOD CODE -> END DATE (NO DATES_MAP)
+# =============================================================================
 
-def tweak_national(national_df):
-  return (
-      df
-        .dropna()
-        .loc[lambda df_: df_["Question"].str.contains('AI | Artificial Intelligence')]
-        .drop(['Question ID', 'Answer ID'], axis='columns')
-        .melt(id_vars=['Question', 'Answer'], value_name='percentage', var_name='end_date')
-        .assign(end_date = lambda df_: pd.to_datetime(df_['end_date'].astype('str').map(dates_map)),
-              percentage= lambda df_: df_['percentage'].str.rstrip('%').astype('float'),
-              Question = lambda df_: df_["Question"].map(ai_map)
-              )
-        .dropna()
+def btos_period_to_end_date(period_series: pd.Series) -> pd.Series:
+    """
+    Convert BTOS biweekly period codes (YYYYPP) into realistic end dates.
+
+    Input examples:
+      "202319"  -> year=2023, period=19
+      "202526"  -> year=2025, period=26
+      "202601"  -> year=2026, period=01
+
+    We anchor period 01 as the first Sunday on or after Jan 1 of that year,
+    then add 14-day steps for each subsequent period.
+
+    end_date = first_sunday(year) + (period - 1) * 14 days
+    """
+    s = period_series.astype(str).str.strip()
+    valid = s.str.fullmatch(r"\d{6}", na=False)
+
+    out = pd.Series(pd.NaT, index=s.index)
+
+    years = s[valid].str.slice(0, 4).astype(int)
+    periods = s[valid].str.slice(4, 6).astype(int)
+
+    jan1 = pd.to_datetime(years.astype(str) + "-01-01")
+    days_until_sunday = (6 - jan1.dt.weekday) % 7
+    first_sunday = jan1 + pd.to_timedelta(days_until_sunday, unit="D")
+
+    end_dates = first_sunday + pd.to_timedelta((periods - 1) * 14, unit="D")
+
+    out.loc[valid] = end_dates.values
+    return out
+
+
+# =============================================================================
+# SECTION 2.6: ROBUST AI QUESTION NORMALIZATION (NO EXACT STRING MATCH)
+# =============================================================================
+
+def normalize_ai_question(question_series: pd.Series) -> pd.Series:
+    """
+    The Census sometimes changes wording slightly, adds extra spaces,
+    or updates "producing goods or services" -> "any of its business functions".
+
+    This function classifies the AI question into one of two labels using
+    'contains' checks rather than exact text matches.
+    """
+    q = question_series.astype(str)
+
+    used_mask = q.str.contains(
+        r"In the last two weeks, did this business use Artificial Intelligence",
+        case=False, na=False
+    )
+
+    intend_mask = q.str.contains(
+        r"During the next six months, do you think this business will be using Artificial Intelligence",
+        case=False, na=False
+    )
+
+    out = pd.Series(pd.NA, index=q.index, dtype="object")
+    out.loc[used_mask] = "Used AI last 2 weeks"
+    out.loc[intend_mask] = "Intend to use AI next 6 months"
+    return out
+
+
+# =============================================================================
+# SECTION 3: APP INITIALIZATION AND CACHING
+# =============================================================================
+
+app = dash.Dash(
+    __name__,
+    external_stylesheets=[dbc.themes.LITERA],
+    meta_tags=[
+        {"name": "viewport", "content": "width=device-width, initial-scale=1.0"},
+        {"http-equiv": "Cache-Control", "content": "no-cache, no-store, must-revalidate"},
+        {"http-equiv": "Pragma", "content": "no-cache"},
+        {"http-equiv": "Expires", "content": "0"}
+    ]
 )
-
-ai_df = tweak_national(df)
-
-# Filter the DataFrames
-
-ai_df_yes = ai_df.loc[ai_df['Answer'] == 'Yes']
-ai_df_no = ai_df.loc[ai_df['Answer'] == 'No']
-ai_df_dont_know = ai_df.loc[ai_df['Answer'] == 'Do not know']
-
-# National Yes graph
-
-fig_yes = (
-    ai_df_yes
-      .groupby(['Question', pd.Grouper(key='end_date', freq='ME')])['percentage']
-      .mean().round(2)
-      .reset_index()
-      .pipe(lambda df_: px.line(df_, x='end_date', y='percentage', color='Question', template='plotly_white', labels={'percentage': '% of Firms', 'end_date': 'Month/Year'}))
-)
-
-# Update layout
-fig_yes.update_layout(height=400, title_text='Did you use AI? Yes', font=dict(family="Times New Roman", size=16), showlegend=False)
-fig_yes.update_annotations(font=dict(family="Times New Roman", size=16))
-fig_yes.update_traces(line=dict(width=3.5))
-
-# National No graph
-
-fig_no = (
-    ai_df_no
-      .groupby(['Question', pd.Grouper(key='end_date', freq='ME')])['percentage']
-      .mean().round(2)
-      .reset_index()
-      .pipe(lambda df_: px.line(df_, x='end_date', y='percentage', color='Question', template='plotly_white', labels={'percentage': '% of Firms', 'end_date': 'Month/Year'}))
-)
-
-# Update layout
-fig_no.update_layout(height=400, title_text='Did you use AI? No', font=dict(family="Times New Roman", size=16))
-fig_no.update_annotations(font=dict(family="Times New Roman", size=16))
-fig_no.update_traces(line=dict(width=3.5))
-
-# States df
-
-states_df = pd.read_excel('https://www.census.gov/hfp/btos/downloads/State.xlsx',
-                          na_values='S')
-
-# States data cleanup
-
-states_df = (
-    states_df
-      .drop(['Question ID', 'Answer ID'], axis = 'columns')
-      .dropna()
-      .loc[lambda df_: df_["Question"].str.contains('AI')]
-      .assign(
-              Question = lambda df_: df_['Question'].map(ai_map),
-              )
-      .melt(id_vars=['State','Question', 'Answer'], value_name='percentage', var_name='end_date')
-      .assign(
-              end_date = lambda df_: pd.to_datetime(df_['end_date'].astype('str').map(dates_map)),
-              percentage = lambda df_: df_['percentage'].str.rstrip('%').astype('float')
-              )
-      .groupby(['State', 'Question', 'Answer', pd.Grouper(key='end_date', freq='ME')])['percentage']
-      .mean()
-      .reset_index()
-)
-
-# Sector-Employees df
-
-sector_empl = pd.read_excel('https://www.census.gov/hfp/btos/downloads/Sector%20by%20Employment%20Size%20Class.xlsx',
-                            na_values='S')
-
-# naics_codes
-
-naics_codes = pd.read_excel('assets/2022_NAICS_Descriptions (6).xlsx')
-
-# naics codes cleanup
-
-naics_codes = (
-    naics_codes
-      .assign(
-          sector = lambda df_: df_['Code'].astype('str'),
-          title = lambda df_: df_['Title'].str.replace('T$','', regex=True).str.replace('and', '&')
-      )
-      .loc[lambda df_: df_['sector'].str.len() == 2]
-      .drop(['Code', 'Title', 'Description'], axis='columns')
-      .reset_index(drop=True)
-)
-
-# Firm size dictionary
-
-label_to_size = {'A': 'Small', 'B': 'Small', 'C': 'Small', 'D': "Small", 'E': 'Medium', 'F': 'Medium', 'G': "Large"}
-
-# sector and employees cleanup
-
-sector_empl = (
-    sector_empl
-      .drop(['Question ID', 'Answer ID'], axis = 'columns')
-      .dropna()
-      .loc[lambda df_: df_["Question"].str.contains('AI | Artificial Intelligence')]
-      .loc[lambda df_: df_["Sector"] != 'XX']
-      .assign(
-              question = lambda df_: df_['Question'].map(ai_map),
-              emp_size = lambda df_: df_["Empsize"].map(label_to_size)
-              )
-      .drop(['Empsize', 'Question'], axis='columns')
-      .melt(id_vars=['Sector', 'emp_size','question', 'Answer'], value_name='percentage', var_name='end_date')
-      .assign(
-               end_date = lambda df_: pd.to_datetime(df_['end_date'].astype('str').map(dates_map)),
-               percentage = lambda df_: df_['percentage'].str.rstrip('%').astype('float'),
-               sector = lambda df_: df_['Sector'].astype('str')
-               )
-       .drop('Sector', axis='columns')
-       .groupby(['sector', 'emp_size', 'question', 'Answer', pd.Grouper(key='end_date', freq='ME')])['percentage']
-       .mean().round(2)
-       .reset_index()
-       .pipe(lambda df_: pd.merge(naics_codes, df_, on='sector'))
-       .rename(columns = {'title': 'industry'})
-       .drop('sector', axis='columns')
-)
-
-# Instantiate the dash app
-
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.LITERA],
-                meta_tags=[{'name': 'viewport',
-                            'content': 'width=device-width, initial-scale=1.0'}]
-                )
-
 server = app.server
 
-# Layout of the dashboard
+# Disable browser caching
+@server.after_request
+def add_header(response):
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, public, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+cache = Cache(app.server, config={
+    "CACHE_TYPE": "filesystem",
+    "CACHE_DIR": os.path.join(os.path.dirname(__file__), ".cache"),
+    "CACHE_DEFAULT_TIMEOUT": 3600,  # 1 hour
+    "CACHE_THRESHOLD": 50
+})
+
+# =============================================================================
+# SECTION 4: DATA LOADING FUNCTIONS
+# =============================================================================
+
+HTTP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def fetch_excel_from_url(url: str) -> io.BytesIO:
+    """Fetch Excel file from URL with proper headers."""
+    req = urllib.request.Request(url, headers=HTTP_HEADERS)
+    with urllib.request.urlopen(req, timeout=60) as response:
+        return io.BytesIO(response.read())
+
+
+def safe_load_data(loader_func, data_name: str, fallback_df=None) -> pd.DataFrame:
+    """Wrapper for safe data loading with error handling."""
+    try:
+        logger.info(f"Loading {data_name}...")
+        data = loader_func()
+        logger.info(f"Successfully loaded {data_name}: {len(data)} rows")
+        return data
+    except Exception as e:
+        logger.error(f"Failed to load {data_name}: {str(e)}")
+        return fallback_df if fallback_df is not None else pd.DataFrame()
+
+
+def load_historical_ai_data() -> pd.DataFrame:
+    """Load historical AI Core Questions from local file (202319-202520)."""
+    return pd.read_excel("assets/AI Core Questions.xlsx").dropna(subset=["Question", "Answer"])
+
+
+def load_national_data() -> pd.DataFrame:
+    """
+    Load national data from Census Bureau and merge with historical AI data.
+    Note: Caching disabled to ensure historical data merge is always applied.
+
+    The Census Bureau changed the AI question wording in late 2025:
+    - Old (202319-202520): "producing goods or services"
+    - New (202521+): "any of its business functions"
+
+    This function splices the historical local data with current remote data
+    to provide a complete time series.
+    """
+    # Load current data from Census Bureau
+    data = fetch_excel_from_url("https://www.census.gov/hfp/btos/downloads/National.xlsx")
+    new_df = pd.read_excel(data)
+
+    # Load historical AI data from local file
+    try:
+        old_ai = load_historical_ai_data()
+
+        # Get period columns from each dataset
+        old_periods = [c for c in old_ai.columns if str(c).isdigit() and len(str(c)) == 6]
+        new_periods = [c for c in new_df.columns if str(c).isdigit() and len(str(c)) == 6]
+
+        # Find periods only in old data (where new data has '.' for AI questions)
+        # Old data covers 202319-202520, new data has values starting ~202524
+        old_only_periods = [p for p in old_periods if int(p) <= 202520]
+        new_only_periods = [p for p in new_periods if int(p) > 202520]
+
+        # Normalize old AI questions to match the mapping
+        old_ai = old_ai.copy()
+
+        # Create merged AI rows with data from both sources
+        merged_rows = []
+        for _, old_row in old_ai.iterrows():
+            # Find matching row in new data by Answer (Yes/No/Do not know)
+            answer = old_row["Answer"]
+            question_type = "used" if "In the last two weeks" in str(old_row["Question"]) else "intend"
+
+            # Get matching new row
+            if question_type == "used":
+                new_match = new_df[
+                    (new_df["Question"].str.contains("In the last two weeks", case=False, na=False)) &
+                    (new_df["Answer"] == answer)
+                ]
+            else:
+                new_match = new_df[
+                    (new_df["Question"].str.contains("During the next six months", case=False, na=False)) &
+                    (new_df["Answer"] == answer)
+                ]
+
+            if len(new_match) > 0:
+                new_row = new_match.iloc[0].copy()
+                # Copy old period values into the new row
+                for p in old_only_periods:
+                    if p in new_row.index:
+                        new_row[p] = old_row[p]
+                merged_rows.append(new_row)
+
+        if merged_rows:
+            # Replace AI rows in new_df with merged rows
+            merged_ai_df = pd.DataFrame(merged_rows)
+
+            # Remove old AI rows from new_df
+            non_ai_df = new_df[~new_df["Question"].str.contains("Artificial Intelligence", case=False, na=False)]
+
+            # Combine non-AI rows with merged AI rows
+            result = pd.concat([non_ai_df, merged_ai_df], ignore_index=True)
+            logger.info(f"Merged historical AI data: {len(old_only_periods)} old periods + {len(new_only_periods)} new periods")
+            return result
+    except Exception as e:
+        logger.warning(f"Could not load historical AI data: {e}. Using current data only.")
+
+    return new_df
+
+
+def load_states_data() -> pd.DataFrame:
+    """
+    Load state-level data from Census Bureau and merge with historical data.
+    Historical data from AI Core Questions.xlsx covers 202319-202520.
+    """
+    # Load current data from Census Bureau
+    data = fetch_excel_from_url("https://www.census.gov/hfp/btos/downloads/State.xlsx")
+    new_df = pd.read_excel(data, na_values="S")
+
+    try:
+        # Load historical state data
+        old_states = pd.read_excel(
+            "assets/AI Core Questions.xlsx",
+            sheet_name="State Estimates"
+        ).dropna(subset=["State", "Question", "Answer"])
+
+        # Filter to AI questions only
+        old_ai = old_states[old_states["Question"].str.contains("Artificial Intelligence", case=False, na=False)]
+
+        if old_ai.empty:
+            return new_df
+
+        # Get period columns
+        old_periods = [c for c in old_ai.columns if str(c).isdigit() and len(str(c)) == 6]
+        old_only_periods = [p for p in old_periods if int(p) <= 202520]
+
+        # Merge historical data into new data
+        merged_rows = []
+        for _, old_row in old_ai.iterrows():
+            state = old_row["State"]
+            answer = old_row["Answer"]
+            question_type = "used" if "In the last two weeks" in str(old_row["Question"]) else "intend"
+
+            # Find matching row in new data
+            if question_type == "used":
+                new_match = new_df[
+                    (new_df["State"] == state) &
+                    (new_df["Question"].str.contains("In the last two weeks", case=False, na=False)) &
+                    (new_df["Answer"] == answer)
+                ]
+            else:
+                new_match = new_df[
+                    (new_df["State"] == state) &
+                    (new_df["Question"].str.contains("During the next six months", case=False, na=False)) &
+                    (new_df["Answer"] == answer)
+                ]
+
+            if len(new_match) > 0:
+                new_row = new_match.iloc[0].copy()
+                for p in old_only_periods:
+                    if p in new_row.index:
+                        new_row[p] = old_row[p]
+                merged_rows.append(new_row)
+
+        if merged_rows:
+            merged_ai_df = pd.DataFrame(merged_rows)
+            non_ai_df = new_df[~new_df["Question"].str.contains("Artificial Intelligence", case=False, na=False)]
+            result = pd.concat([non_ai_df, merged_ai_df], ignore_index=True)
+            logger.info(f"Merged historical State AI data: {len(old_only_periods)} old periods")
+            return result
+
+    except Exception as e:
+        logger.warning(f"Could not load historical State data: {e}")
+
+    return new_df
+
+
+def load_sector_employment_data() -> pd.DataFrame:
+    """
+    Load sector/employment data from Census Bureau and merge with historical data.
+    Historical data from AI Core Questions.xlsx covers 202319-202520.
+    """
+    # Load current data from Census Bureau
+    data = fetch_excel_from_url(
+        "https://www.census.gov/hfp/btos/downloads/Sector%20by%20Employment%20Size%20Class.xlsx"
+    )
+    new_df = pd.read_excel(data, na_values="S")
+
+    try:
+        # Load historical sector x employment data
+        old_sector = pd.read_excel(
+            "assets/AI Core Questions.xlsx",
+            sheet_name="Sector x Employment Estimates"
+        ).dropna(subset=["Sector", "Empsize", "Question", "Answer"])
+
+        # Filter to AI questions only
+        old_ai = old_sector[old_sector["Question"].str.contains("Artificial Intelligence", case=False, na=False)]
+
+        if old_ai.empty:
+            return new_df
+
+        # Get period columns
+        old_periods = [c for c in old_ai.columns if str(c).isdigit() and len(str(c)) == 6]
+        old_only_periods = [p for p in old_periods if int(p) <= 202520]
+
+        # Merge historical data into new data
+        merged_rows = []
+        for _, old_row in old_ai.iterrows():
+            sector = old_row["Sector"]
+            empsize = old_row["Empsize"]
+            answer = old_row["Answer"]
+            question_type = "used" if "In the last two weeks" in str(old_row["Question"]) else "intend"
+
+            # Find matching row in new data
+            if question_type == "used":
+                new_match = new_df[
+                    (new_df["Sector"] == sector) &
+                    (new_df["Empsize"] == empsize) &
+                    (new_df["Question"].str.contains("In the last two weeks", case=False, na=False)) &
+                    (new_df["Answer"] == answer)
+                ]
+            else:
+                new_match = new_df[
+                    (new_df["Sector"] == sector) &
+                    (new_df["Empsize"] == empsize) &
+                    (new_df["Question"].str.contains("During the next six months", case=False, na=False)) &
+                    (new_df["Answer"] == answer)
+                ]
+
+            if len(new_match) > 0:
+                new_row = new_match.iloc[0].copy()
+                for p in old_only_periods:
+                    if p in new_row.index:
+                        new_row[p] = old_row[p]
+                merged_rows.append(new_row)
+
+        if merged_rows:
+            merged_ai_df = pd.DataFrame(merged_rows)
+            non_ai_df = new_df[~new_df["Question"].str.contains("Artificial Intelligence", case=False, na=False)]
+            result = pd.concat([non_ai_df, merged_ai_df], ignore_index=True)
+            logger.info(f"Merged historical Sector AI data: {len(old_only_periods)} old periods")
+            return result
+
+    except Exception as e:
+        logger.warning(f"Could not load historical Sector data: {e}")
+
+    return new_df
+
+
+def load_naics_codes() -> pd.DataFrame:
+    """Load local NAICS codes."""
+    return pd.read_excel("assets/2022_NAICS_Descriptions (6).xlsx")
+
+
+# =============================================================================
+# SECTION 5: DATA TRANSFORMATION FUNCTIONS
+# =============================================================================
+
+def clean_percentage(series: pd.Series) -> pd.Series:
+    """
+    Convert percent strings like "12.3%" into numeric 12.3.
+    Handles '.' or blanks by converting them to NaN.
+    """
+    s = series.astype(str).str.strip()
+    s = s.str.rstrip("%").replace(".", pd.NA)
+    return pd.to_numeric(s, errors="coerce")
+
+
+def tweak_national(national_df: pd.DataFrame) -> pd.DataFrame:
+    """Transform national survey data into long format."""
+    return (
+        national_df
+        .dropna(subset=["Question", "Answer"])  # ✅ do not global dropna()
+        .loc[lambda df_: df_["Question"].str.contains("Artificial Intelligence", case=False, na=False)]
+        .drop(["Question ID", "Answer ID"], axis="columns", errors="ignore")
+        .melt(id_vars=["Question", "Answer"], value_name="percentage", var_name="end_date")
+        .assign(
+            end_date=lambda df_: btos_period_to_end_date(df_["end_date"]),
+            percentage=lambda df_: clean_percentage(df_["percentage"]),
+            Question=lambda df_: normalize_ai_question(df_["Question"])
+        )
+        .dropna(subset=["end_date", "percentage", "Question"])
+    )
+
+
+def tweak_states(states_raw: pd.DataFrame) -> pd.DataFrame:
+    """Transform state-level survey data into long format with monthly aggregation."""
+    return (
+        states_raw
+        .drop(["Question ID", "Answer ID"], axis="columns", errors="ignore")
+        .dropna(subset=["State", "Question", "Answer"])
+        .loc[lambda df_: df_["Question"].str.contains("Artificial Intelligence", case=False, na=False)]
+        .assign(Question=lambda df_: normalize_ai_question(df_["Question"]))
+        .melt(id_vars=["State", "Question", "Answer"], value_name="percentage", var_name="end_date")
+        .assign(
+            end_date=lambda df_: btos_period_to_end_date(df_["end_date"]),
+            percentage=lambda df_: clean_percentage(df_["percentage"])
+        )
+        .dropna(subset=["end_date", "percentage", "Question"])
+        .groupby(["State", "Question", "Answer", pd.Grouper(key="end_date", freq="ME")])["percentage"]
+        .mean()
+        .reset_index()
+    )
+
+
+def tweak_sector_employment(sector_raw: pd.DataFrame, naics_codes: pd.DataFrame) -> pd.DataFrame:
+    """Transform sector/employment survey data into long format with NAICS industry names."""
+    naics_clean = (
+        naics_codes
+        .dropna(subset=["Code", "Title"])
+        .assign(
+            sector=lambda df_: df_["Code"].astype(str).str.strip(),
+            title=lambda df_: df_["Title"].astype(str)
+            .str.replace("T$", "", regex=True)
+            .str.replace("and", "&")
+        )
+        .loc[lambda df_: df_["sector"].str.len() == 2]
+        .drop(["Code", "Title", "Description"], axis="columns", errors="ignore")
+        .reset_index(drop=True)
+    )
+
+    return (
+        sector_raw
+        .drop(["Question ID", "Answer ID"], axis="columns", errors="ignore")
+        .dropna(subset=["Sector", "Empsize", "Question", "Answer"])
+        .loc[lambda df_: df_["Question"].str.contains("Artificial Intelligence", case=False, na=False)]
+        .loc[lambda df_: df_["Sector"] != "XX"]
+        .assign(
+            question=lambda df_: normalize_ai_question(df_["Question"]),
+            emp_size=lambda df_: df_["Empsize"].map(LABEL_TO_SIZE),
+            sector=lambda df_: df_["Sector"].astype(str).str.strip()
+        )
+        .drop(["Empsize", "Question"], axis="columns", errors="ignore")
+        .melt(
+            id_vars=["sector", "emp_size", "question", "Answer"],
+            value_name="percentage",
+            var_name="end_date"
+        )
+        .assign(
+            end_date=lambda df_: btos_period_to_end_date(df_["end_date"]),
+            percentage=lambda df_: clean_percentage(df_["percentage"])
+        )
+        .dropna(subset=["end_date", "percentage", "question", "emp_size", "sector"])
+        .groupby(["sector", "emp_size", "question", "Answer", pd.Grouper(key="end_date", freq="ME")])["percentage"]
+        .mean()
+        .round(2)
+        .reset_index()
+        .pipe(lambda df_: pd.merge(naics_clean, df_, on="sector", how="inner"))
+        .rename(columns={"title": "industry"})
+        .drop("sector", axis="columns", errors="ignore")
+    )
+
+
+# =============================================================================
+# SECTION 6: LOAD AND TRANSFORM DATA
+# =============================================================================
+
+df_national_raw = safe_load_data(load_national_data, "National Data")
+states_df_raw = safe_load_data(load_states_data, "States Data")
+sector_empl_raw = safe_load_data(load_sector_employment_data, "Sector Employment Data")
+naics_codes = safe_load_data(load_naics_codes, "NAICS Codes")
+
+ai_df = tweak_national(df_national_raw) if not df_national_raw.empty else pd.DataFrame()
+states_df = tweak_states(states_df_raw) if not states_df_raw.empty else pd.DataFrame()
+sector_empl = tweak_sector_employment(sector_empl_raw, naics_codes) if not sector_empl_raw.empty else pd.DataFrame()
+
+ai_df_yes = ai_df.loc[ai_df["Answer"] == "Yes"] if not ai_df.empty else pd.DataFrame()
+ai_df_no = ai_df.loc[ai_df["Answer"] == "No"] if not ai_df.empty else pd.DataFrame()
+
+# Debug printouts
+print("AI DF rows:", len(ai_df))
+if not ai_df.empty:
+    print("AI DF date min/max:", ai_df["end_date"].min(), ai_df["end_date"].max())
+    print("Unique months:", ai_df["end_date"].dt.to_period("M").nunique())
+
+# =============================================================================
+# SECTION 7: FIGURE CREATION FUNCTIONS
+# =============================================================================
+
+def create_empty_figure(message="Select options above to view data"):
+    """Create an empty figure with a centered message."""
+    fig = go.Figure()
+    fig.add_annotation(
+        text=message,
+        xref="paper", yref="paper",
+        x=0.5, y=0.5,
+        showarrow=False,
+        font=dict(size=16, color="gray")
+    )
+    fig.update_layout(
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+        template="plotly_white",
+        height=400
+    )
+    return fig
+
+
+def create_national_figure(df: pd.DataFrame, title: str):
+    """Create national trend figure."""
+    if df.empty:
+        return create_empty_figure("No data available")
+
+    # Debug: Check what data we're working with
+    print(f"create_national_figure({title}): input df has {len(df)} rows")
+    print(f"  Date range: {df['end_date'].min()} to {df['end_date'].max()}")
+
+    grouped = (
+        df
+        .groupby(["Question", pd.Grouper(key="end_date", freq="ME")])["percentage"]
+        .mean()
+        .round(2)
+        .reset_index()
+    )
+    print(f"  After groupby: {len(grouped)} rows, dates: {grouped['end_date'].min()} to {grouped['end_date'].max()}")
+
+    fig = px.line(
+        grouped,
+        x="end_date",
+        y="percentage",
+        color="Question",
+        template="plotly_white",
+        labels={"percentage": "% of Firms", "end_date": "Month/Year"}
+    )
+
+    fig.update_layout(
+        height=400,
+        title_text=title,
+        font=dict(family="Times New Roman", size=16),
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5),
+        autosize=True,
+        margin=dict(l=40, r=40, t=50, b=80)
+    )
+    fig.update_traces(line=dict(width=3.5))
+    fig.update_xaxes(tickformat="%b %Y", title_text="Month/Year")
+    return fig
+
+
+print("ai_df_yes rows:", len(ai_df_yes), "date range:", ai_df_yes["end_date"].min(), "to", ai_df_yes["end_date"].max() if not ai_df_yes.empty else "empty")
+print("ai_df_no rows:", len(ai_df_no), "date range:", ai_df_no["end_date"].min(), "to", ai_df_no["end_date"].max() if not ai_df_no.empty else "empty")
+
+fig_yes = create_national_figure(ai_df_yes, "Did you use AI? Yes")
+fig_no = create_national_figure(ai_df_no, "Did you use AI? No")
+
+
+# =============================================================================
+# SECTION 8: LAYOUT DEFINITION
+# =============================================================================
 
 app.layout = dbc.Container([
+
     dbc.Row([
-        dbc.Col(html.H1("National AI Adoption Tracker",
-                        className='text-center text-success mb-4'),
-                width=12),
-        dbc.Col(html.P("AI is one of the transformative technologies of our times. "
-                       "How US businesses adopt this technology is of utmost importance. "
-                       "The US Census Bureau added supplemental content on AI to its Business Trends and Outlook Survey "
-                       "asking if US businesses are using AI in creating products and services. The top two graphs show you "
-                       "businesses responding Yes and No to the question of using AI. The bottom two graphs "
-                       "allow you to explore the data by US states and by industry sectors and firm sizes." ,
-                       className='text-primary'), width=12)
+        dbc.Col(
+            html.H1("National AI Adoption Tracker", className="text-center text-success mb-4"),
+            width=12
+        ),
+        dbc.Col(
+            html.Small(f"Data: Sep 2023 - Jan 2026 ({len(ai_df)} records)", className="text-muted text-center d-block mb-2"),
+            width=12
+        ),
+        dbc.Col(
+            html.P(
+                "AI is one of the transformative technologies of our times. "
+                "How US businesses adopt this technology is of utmost importance. "
+                "The US Census Bureau added supplemental content on AI to its Business Trends and Outlook Survey. "
+                "The top two graphs show businesses responding Yes and No to the question of using AI. "
+                "The map and bottom graphs allow you to explore the data by US states and by industry sectors and firm sizes.",
+                className="text-primary"
+            ),
+            width=12
+        )
     ]),
 
     dbc.Row([
@@ -189,7 +627,10 @@ app.layout = dbc.Container([
             dbc.Card([
                 dbc.CardHeader(html.H4("Did you use AI? Yes")),
                 dbc.CardBody([
-                    dcc.Graph(id='national-yes-fig', figure=fig_yes)
+                    dcc.Loading(
+                        type="circle",
+                        children=[dcc.Graph(id="national-yes-fig", figure=fig_yes, config={"responsive": True})]
+                    )
                 ])
             ])
         ], width=6, xs=12, sm=12, md=12, lg=6, xl=6),
@@ -198,246 +639,385 @@ app.layout = dbc.Container([
             dbc.Card([
                 dbc.CardHeader(html.H4("Did you use AI? No")),
                 dbc.CardBody([
-                    dcc.Graph(id='national-no-fig', figure=fig_no)
+                    dcc.Loading(
+                        type="circle",
+                        children=[dcc.Graph(id="national-no-fig", figure=fig_no, config={"responsive": True})]
+                    )
                 ])
             ])
         ], width=6, xs=12, sm=12, md=12, lg=6, xl=6),
-    ], justify='center'),
+    ], justify="center", className="mb-4"),
 
     dbc.Row([
         dbc.Col([
             dbc.Card([
-                dbc.CardHeader(html.H4("US States")),
+                dbc.CardHeader([
+                    html.H4("AI Adoption by State", className="d-inline"),
+                    html.Small(" (Average across all available periods)", className="text-muted ms-2")
+                ]),
                 dbc.CardBody([
-                    dcc.Dropdown(
-                        id='state-dropdown', placeholder='Select US states',
-                        style={'height': '20px', 'width': '100%'},
-                        options=[{'label': s, 'value': s} for s in states_df['State'].unique()],
-                        multi=True,
-                        className='p-1'
+                    dbc.Row([
+                        dbc.Col([
+                            dcc.Dropdown(
+                                id="map-question-dropdown",
+                                placeholder="Select a question",
+                                options=[
+                                    {"label": "Intend to use AI next 6 months", "value": "Intend"},
+                                    {"label": "Used AI last 2 weeks", "value": "Used"}
+                                ],
+                                value="Used",
+                                className="mb-2"
+                            ),
+                        ], md=6),
+                        dbc.Col([
+                            dbc.RadioItems(
+                                id="map-answer-radio",
+                                options=[
+                                    {"label": "Yes", "value": "Yes"},
+                                    {"label": "No", "value": "No"}
+                                ],
+                                value="Yes",
+                                inline=True,
+                                className="mt-2"
+                            )
+                        ], md=6),
+                    ]),
+                    dcc.Loading(
+                        type="circle",
+                        children=[
+                            dcc.Graph(
+                                id="choropleth-map",
+                                figure=create_empty_figure("Select options to view the map"),
+                                config={"responsive": True}
+                            )
+                        ]
                     ),
-                    html.Div(style={'height': '20px'}),  # Adjusting space
-                    dcc.Dropdown(
-                        id='question-dropdown-state', placeholder='Select a question',
-                        style={'height': '20px', 'width': '100%'},
-                        options=[
-                            {'label': 'Intend to use AI next 6 months', 'value': 'Intend'},
-                            {'label': 'Used AI last 2 weeks', 'value': 'Used'}
-                        ],
-                        className='p-1'
-                    ),
-                    html.Br(),  # Adding space
-                    html.Label("Select One Answer Choice"),
-                    dcc.Checklist(
-                        id='answer-checkbox-state',
-                        options=[
-                            {'label': 'Yes', 'value': 'Yes'},
-                            {'label': 'No', 'value': 'No'},
-                            {'label': 'Do not know', 'value': 'Do not know'}
-                        ],
-                        value=[],
-                        inline=True,
-                        labelClassName="p-1"
-                    ),
-                    dcc.Graph(id='states-plot', figure={})  # Initialize with empty figure
+                    # Hidden dropdown to maintain callback compatibility
+                    html.Div(dcc.Dropdown(id="map-date-dropdown"), style={"display": "none"})
                 ])
             ])
-        ], width=6, xs=12, sm=12, md=12, lg=6, xl=6, className='p-2'),
+        ], width=12)
+    ], className="mb-4"),
+
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardHeader(html.H4("US States Explorer")),
+                dbc.CardBody([
+                    dcc.Dropdown(
+                        id="state-dropdown",
+                        placeholder="Select US states",
+                        options=[{"label": s, "value": s} for s in sorted(states_df["State"].unique())] if not states_df.empty else [],
+                        multi=True,
+                        className="mb-2"
+                    ),
+                    dcc.Dropdown(
+                        id="question-dropdown-state",
+                        placeholder="Select a question",
+                        options=[
+                            {"label": "Intend to use AI next 6 months", "value": "Intend"},
+                            {"label": "Used AI last 2 weeks", "value": "Used"}
+                        ],
+                        className="mb-2"
+                    ),
+                    html.Label("Select Answer", className="mb-1"),
+                    dbc.RadioItems(
+                        id="answer-radio-state",
+                        options=[
+                            {"label": "Yes", "value": "Yes"},
+                            {"label": "No", "value": "No"},
+                            {"label": "Do not know", "value": "Do not know"}
+                        ],
+                        value=None,
+                        inline=True,
+                        className="mb-3"
+                    ),
+                    dcc.Loading(
+                        type="circle",
+                        children=[
+                            dcc.Graph(id="states-plot", figure=create_empty_figure(), config={"responsive": True})
+                        ]
+                    )
+                ])
+            ])
+        ], width=6, xs=12, sm=12, md=12, lg=6, xl=6, className="p-2"),
 
         dbc.Col([
             dbc.Card([
                 dbc.CardHeader(html.H4("Industries and Firm Sizes")),
                 dbc.CardBody([
                     dcc.Dropdown(
-                        id='industry-dropdown', placeholder="Select an industry",
-                        style={'height': '20px', 'width': '100%'},
-                        options=[{'label': industry, 'value': industry} for industry in
-                                 sector_empl['industry'].unique()],
-                        className='p-1'
+                        id="industry-dropdown",
+                        placeholder="Select an industry",
+                        options=[{"label": industry, "value": industry} for industry in sorted(sector_empl["industry"].unique())] if not sector_empl.empty else [],
+                        className="mb-2"
                     ),
-                    html.Div(style={'height': '20px'}),  # Adjusting space
                     dcc.Dropdown(
-                        id='question-dropdown-sector', placeholder='Select a question',
-                        style={'height': '20px', 'width': '100%'},
-                        options=[{'label': question, 'value': question} for question in
-                                 sector_empl['question'].unique()],
-                        className='p-1'
+                        id="question-dropdown-sector",
+                        placeholder="Select a question",
+                        options=[{"label": q, "value": q} for q in sorted(sector_empl["question"].unique())] if not sector_empl.empty else [],
+                        className="mb-2"
                     ),
-                    html.Br(),
-                    html.Label("Select One Answer Choice"),
-                    dcc.Checklist(
-                        id='answer-checkbox-sector',
+                    html.Label("Select Answer", className="mb-1"),
+                    dbc.RadioItems(
+                        id="answer-radio-sector",
                         options=[
-                            {'label': 'Yes', 'value': 'Yes'},
-                            {'label': 'No', 'value': 'No'},
-                            {'label': 'Do not know', 'value': 'Do not know'}
+                            {"label": "Yes", "value": "Yes"},
+                            {"label": "No", "value": "No"},
+                            {"label": "Do not know", "value": "Do not know"}
                         ],
-                        value=[],  # No initial value
+                        value=None,
                         inline=True,
-                        labelClassName="p-1"
+                        className="mb-3"
                     ),
-                    dcc.Graph(id='sector-empl-plot', figure={})
+                    dcc.Loading(
+                        type="circle",
+                        children=[
+                            dcc.Graph(id="sector-empl-plot", figure=create_empty_figure(), config={"responsive": True})
+                        ]
+                    )
                 ])
             ])
-        ], width=6, xs=12, sm=12, md=12, lg=6, xl=6, className='p-2')
-    ], justify='center'),
+        ], width=6, xs=12, sm=12, md=12, lg=6, xl=6, className="p-2")
+    ], justify="center"),
 
     html.Div([
         dbc.Row([
-            dbc.Col(html.Button('Data Details PDF', id='btn-pdf', className='btn btn-success'), width=6,
-                    style={'textAlign': 'left'}),
-            dbc.Col(html.Img(src="/assets/aatiny.jpg", style={'marginRight': '50px'}, height="50px"), width=6,
-                    style={'textAlign': 'right'}),
+            dbc.Col(
+                html.Button("Data Details PDF", id="btn-pdf", className="btn btn-success"),
+                width=6,
+                style={"textAlign": "left"}
+            ),
+            dbc.Col(
+                html.Img(src="/assets/aatiny.jpg", style={"marginRight": "50px"}, height="50px"),
+                width=6,
+                style={"textAlign": "right"}
+            ),
         ], style={"position": "fixed", "bottom": 8, "left": 8, "right": 8, "zIndex": 999}),
-        dcc.Download(id='download-link'),
+        dcc.Download(id="download-link"),
     ])
+
 ], fluid=True)
 
-# Callback for the States plot
+
+# =============================================================================
+# SECTION 9: CALLBACKS - Choropleth Map
+# =============================================================================
 
 @app.callback(
-    Output('states-plot', 'figure'),
-    [Input('state-dropdown', 'value'),
-     Input('question-dropdown-state', 'value'),
-     Input('answer-checkbox-state', 'value')]
-     )
-def update_states_plot(selected_states, selected_question, selected_answers):
-    # If any selection is missing, return empty figure
-    if not (selected_states and selected_question and selected_answers):
-        return {}
-
-    # Filter DataFrame based on selections
-    filtered_df = states_df[(states_df['State'].isin(selected_states)) &
-                     (states_df['Question'].str.contains(selected_question)) &
-                     (states_df['Answer'].isin(selected_answers))]
-
-    # If no data after filtering, return empty figure
-    if filtered_df.empty:
-        return {}
-
-    # Calculate median for the selected data
-    median_value = filtered_df['percentage'].median()
-
-    fig = px.line(filtered_df, x='end_date', y='percentage', color='State',
-                  title='', color_discrete_sequence=px.colors.qualitative.Light24,
-                  width=500, height=400,
-                  template='plotly_white', labels={'percentage': 'Percentage',
-                                                   'end_date': 'Month/Year',
-                                                   'State': 'States'})
-    fig.update_traces(line=dict(width=3.5))
-
-    # Add dashed line representing median with annotation below the line
-    fig.add_shape(type='line',
-                  x0=filtered_df['end_date'].min(), y0=median_value,
-                  x1=filtered_df['end_date'].max(), y1=median_value,
-                  line=dict(color='red', width=2, dash='dash'),
-                  name='Median'
-                  )
-    fig.add_annotation(x=filtered_df['end_date'].max(), y=median_value - 0.5,
-                       xref="x", yref="y",
-                       text="National Median",
-                       showarrow=False,
-                       font=dict(family="Times New Roman", size=12, color="red")
-                       )
-
-    return fig
-
-# Callback for industry sector and firm size plot
-
-@app.callback(
-    Output('sector-empl-plot', 'figure'),
-    [Input('industry-dropdown', 'value'),
-     Input('question-dropdown-sector', 'value'),
-     Input('answer-checkbox-sector', 'value')]
+    Output("map-date-dropdown", "options"),
+    Output("map-date-dropdown", "value"),
+    Input("map-question-dropdown", "value")
 )
-def update_sector_plot(selected_industry, selected_question, selected_answers):
-    # If any selection is missing, return an empty figure
-    if not (selected_industry and selected_question and selected_answers):
-        return {}
+def update_map_date_options(_question):
+    """Populate date dropdown - kept for compatibility but not displayed."""
+    return [], None
 
-    # Convert single selected values to lists to match the logic in the filtering
-    if isinstance(selected_industry, str):
-        selected_industry = [selected_industry]
-    if isinstance(selected_question, str):
-        selected_question = [selected_question]
-    if isinstance(selected_answers, str):
-        selected_answers = [selected_answers]
 
-    # Filter DataFrame based on selections
-    filtered_df = sector_empl[(sector_empl['industry'].isin(selected_industry)) &
-                     (sector_empl['question'].isin(selected_question)) &
-                     (sector_empl['Answer'].isin(selected_answers))]
+@app.callback(
+    Output("choropleth-map", "figure"),
+    [Input("map-question-dropdown", "value"),
+     Input("map-answer-radio", "value")]
+)
+def update_choropleth(question, answer):
+    """Update choropleth map showing average across all available periods."""
+    if not all([question, answer]) or states_df.empty:
+        return create_empty_figure("Select options to view the map")
 
-    # If no data after filtering, return an empty figure
-    if filtered_df.empty:
-        return {}
-    median_value = filtered_df['percentage'].median()
+    # Filter by question and answer, then average across all dates
+    map_df = states_df[
+        (states_df["Question"].str.contains(question, na=False)) &
+        (states_df["Answer"] == answer)
+    ].copy()
 
-    # Create the line plot
-    fig = px.line(filtered_df, x='end_date', y='percentage', color='emp_size', color_discrete_sequence=px.colors.qualitative.Light24,
-                  title='',
-                  labels={'percentage': 'Percentage', 'end_date': 'Month/Year', 'emp_size': 'Firm Size'},
-                  template='plotly_white',
-                  width=500, height=400,)
-    fig.update_xaxes(
-        tickvals=filtered_df['end_date'].unique(),
-        tickformat= '%b %Y'
+    if map_df.empty:
+        return create_empty_figure("No data available for selection")
+
+    # Calculate average percentage per state across all time periods
+    map_df = (
+        map_df
+        .groupby("State")["percentage"]
+        .mean()
+        .round(1)
+        .reset_index()
     )
 
-    fig.update_traces(line=dict(width=3.5))
+    map_df["state_code"] = map_df["State"].map(STATE_CODES)
 
-    # Add dashed line representing median with annotation below the line
-    fig.add_shape(type='line',
-                  x0=filtered_df['end_date'].min(), y0=median_value,
-                  x1=filtered_df['end_date'].max(), y1=median_value,
-                  line=dict(color='red', width=2, dash='dash'),
-                  name='Median'
-                  )
-    fig.add_annotation(x=filtered_df['end_date'].max(), y=median_value - 0.5,
-                       xref="x", yref="y",
-                       text="National Median",
-                       showarrow=False,
-                       font=dict(family="Times New Roman", size=12, color="red")
-                       )
+    fig = px.choropleth(
+        map_df,
+        locations="state_code",
+        locationmode="USA-states",
+        color="percentage",
+        scope="usa",
+        color_continuous_scale="Blues",
+        labels={"percentage": "% of Firms"},
+        hover_name="State",
+        hover_data={"state_code": False, "percentage": ":.1f"}
+    )
+
+    fig.update_layout(
+        geo=dict(showlakes=True, lakecolor="rgb(255, 255, 255)"),
+        margin=dict(l=0, r=0, t=30, b=0),
+        coloraxis_colorbar=dict(title="% of Firms", ticksuffix="%"),
+        height=450
+    )
 
     return fig
 
-# Callback for Checklist
 
 @app.callback(
-    Output('answer-checkbox-state', 'value'),
-    [Input('answer-checkbox-state', 'value')]
+    Output("state-dropdown", "value"),
+    Input("choropleth-map", "clickData"),
+    prevent_initial_call=True
 )
-def update_checklist_value(selected_values):
-    # If multiple values are selected, keep only the last one
-    if len(selected_values) > 1:
-        return [selected_values[-1]]
-    return selected_values
+def map_click_to_dropdown(click_data):
+    """When user clicks a state on map, add it to state dropdown."""
+    if click_data is None:
+        return dash.no_update
+
+    state_code = click_data["points"][0].get("location")
+    if state_code:
+        state_name = {v: k for k, v in STATE_CODES.items()}.get(state_code)
+        return [state_name] if state_name else dash.no_update
+
+    return dash.no_update
+
+
+# =============================================================================
+# SECTION 10: CALLBACKS - States Explorer
+# =============================================================================
 
 @app.callback(
-    Output('answer-checkbox-sector', 'value'),
-    [Input('answer-checkbox-sector', 'value')]
+    Output("states-plot", "figure"),
+    [Input("state-dropdown", "value"),
+     Input("question-dropdown-state", "value"),
+     Input("answer-radio-state", "value")]
 )
-def update_checklist_value(selected_values):
-    # If multiple values are selected, keep only the last one
-    if len(selected_values) > 1:
-        return [selected_values[-1]]
-    return selected_values
+def update_states_plot(selected_states, selected_question, selected_answer):
+    """Update states comparison plot."""
+    if not (selected_states and selected_question and selected_answer) or states_df.empty:
+        return create_empty_figure()
 
-# Download PDF
+    filtered_df = states_df[
+        (states_df["State"].isin(selected_states)) &
+        (states_df["Question"].str.contains(selected_question, na=False)) &
+        (states_df["Answer"] == selected_answer)
+    ]
+
+    if filtered_df.empty:
+        return create_empty_figure("No data available for selection")
+
+    median_value = filtered_df["percentage"].median()
+
+    fig = px.line(
+        filtered_df,
+        x="end_date",
+        y="percentage",
+        color="State",
+        title="",
+        color_discrete_sequence=px.colors.qualitative.Light24,
+        height=400,
+        template="plotly_white",
+        labels={"percentage": "Percentage", "end_date": "Month/Year", "State": "States"}
+    )
+    fig.update_layout(autosize=True, margin=dict(l=40, r=40, t=40, b=40))
+    fig.update_xaxes(tickformat="%b %Y", title_text="Month/Year")
+    fig.update_traces(line=dict(width=3.5))
+
+    fig.add_shape(
+        type="line",
+        x0=filtered_df["end_date"].min(), y0=median_value,
+        x1=filtered_df["end_date"].max(), y1=median_value,
+        line=dict(color="red", width=2, dash="dash")
+    )
+    fig.add_annotation(
+        x=filtered_df["end_date"].max(), y=median_value - 0.5,
+        text="National Median",
+        showarrow=False,
+        font=dict(family="Times New Roman", size=12, color="red")
+    )
+
+    return fig
+
+
+# =============================================================================
+# SECTION 11: CALLBACKS - Sector/Industry Explorer
+# =============================================================================
 
 @app.callback(
-    Output('download-link', 'data'),
-    Input('btn-pdf', 'n_clicks'),
+    Output("sector-empl-plot", "figure"),
+    [Input("industry-dropdown", "value"),
+     Input("question-dropdown-sector", "value"),
+     Input("answer-radio-sector", "value")]
+)
+def update_sector_plot(selected_industry, selected_question, selected_answer):
+    """Update sector/industry comparison plot."""
+    if not (selected_industry and selected_question and selected_answer) or sector_empl.empty:
+        return create_empty_figure()
+
+    filtered_df = sector_empl[
+        (sector_empl["industry"] == selected_industry) &
+        (sector_empl["question"] == selected_question) &
+        (sector_empl["Answer"] == selected_answer)
+    ]
+
+    if filtered_df.empty:
+        return create_empty_figure("No data available for selection")
+
+    median_value = filtered_df["percentage"].median()
+
+    fig = px.line(
+        filtered_df,
+        x="end_date",
+        y="percentage",
+        color="emp_size",
+        color_discrete_sequence=px.colors.qualitative.Light24,
+        title="",
+        labels={"percentage": "Percentage", "end_date": "Month/Year", "emp_size": "Firm Size"},
+        template="plotly_white",
+        height=400
+    )
+    fig.update_layout(autosize=True, margin=dict(l=40, r=40, t=40, b=40))
+    fig.update_xaxes(tickformat="%b %Y", title_text="Month/Year")
+    fig.update_traces(line=dict(width=3.5))
+
+    fig.add_shape(
+        type="line",
+        x0=filtered_df["end_date"].min(), y0=median_value,
+        x1=filtered_df["end_date"].max(), y1=median_value,
+        line=dict(color="red", width=2, dash="dash")
+    )
+    fig.add_annotation(
+        x=filtered_df["end_date"].max(), y=median_value - 0.5,
+        text="National Median",
+        showarrow=False,
+        font=dict(family="Times New Roman", size=12, color="red")
+    )
+
+    return fig
+
+
+# =============================================================================
+# SECTION 12: CALLBACKS - PDF Download
+# =============================================================================
+
+@app.callback(
+    Output("download-link", "data"),
+    Input("btn-pdf", "n_clicks"),
     prevent_initial_call=True
 )
 def trigger_download(n_clicks):
+    """Trigger PDF download."""
     if n_clicks:
-        file_path = 'assets/BTOS_AI_Data_Description.pdf'
+        file_path = "assets/BTOS_AI_Data_Description.pdf"
         return dcc.send_file(file_path)
 
-import os
 
-if __name__ == '__main__':
+# =============================================================================
+# SECTION 13: APP ENTRY POINT
+# =============================================================================
+
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8050))
-    app.run_server(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=False)
