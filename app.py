@@ -47,6 +47,9 @@ STATE_CODES = {
     'District of Columbia': 'DC'
 }
 
+# Reverse lookup: abbreviation to state name (pre-computed for efficiency)
+CODE_TO_STATE = {v: k for k, v in STATE_CODES.items()}
+
 # =============================================================================
 # SECTION 2.5: BTOS PERIOD CODE -> END DATE (NO DATES_MAP)
 # =============================================================================
@@ -132,7 +135,7 @@ server = app.server
 # Disable browser caching
 @server.after_request
 def add_header(response):
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, public, max-age=0"
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     return response
@@ -177,15 +180,16 @@ def safe_load_data(loader_func, data_name: str, fallback_df=None) -> pd.DataFram
         return fallback_df if fallback_df is not None else pd.DataFrame()
 
 
+@cache.memoize(timeout=3600)
 def load_historical_ai_data() -> pd.DataFrame:
     """Load historical AI Core Questions from local file (202319-202520)."""
     return pd.read_excel("assets/AI Core Questions.xlsx").dropna(subset=["Question", "Answer"])
 
 
+@cache.memoize(timeout=3600)
 def load_national_data() -> pd.DataFrame:
     """
     Load national data from Census Bureau and merge with historical AI data.
-    Note: Caching disabled to ensure historical data merge is always applied.
 
     The Census Bureau changed the AI question wording in late 2025:
     - Old (202319-202520): "producing goods or services"
@@ -240,6 +244,8 @@ def load_national_data() -> pd.DataFrame:
                     if p in new_row.index:
                         new_row[p] = old_row[p]
                 merged_rows.append(new_row)
+            else:
+                logger.warning(f"No match found for national AI data: {question_type}, Answer={answer}")
 
         if merged_rows:
             # Replace AI rows in new_df with merged rows
@@ -258,6 +264,7 @@ def load_national_data() -> pd.DataFrame:
     return new_df
 
 
+@cache.memoize(timeout=3600)
 def load_states_data() -> pd.DataFrame:
     """
     Load state-level data from Census Bureau and merge with historical data.
@@ -311,6 +318,8 @@ def load_states_data() -> pd.DataFrame:
                     if p in new_row.index:
                         new_row[p] = old_row[p]
                 merged_rows.append(new_row)
+            else:
+                logger.warning(f"No match found for state AI data: State={state}, {question_type}, Answer={answer}")
 
         if merged_rows:
             merged_ai_df = pd.DataFrame(merged_rows)
@@ -325,6 +334,7 @@ def load_states_data() -> pd.DataFrame:
     return new_df
 
 
+@cache.memoize(timeout=3600)
 def load_sector_employment_data() -> pd.DataFrame:
     """
     Load sector/employment data from Census Bureau and merge with historical data.
@@ -383,6 +393,8 @@ def load_sector_employment_data() -> pd.DataFrame:
                     if p in new_row.index:
                         new_row[p] = old_row[p]
                 merged_rows.append(new_row)
+            else:
+                logger.warning(f"No match found for sector AI data: Sector={sector}, Empsize={empsize}, {question_type}, Answer={answer}")
 
         if merged_rows:
             merged_ai_df = pd.DataFrame(merged_rows)
@@ -397,6 +409,7 @@ def load_sector_employment_data() -> pd.DataFrame:
     return new_df
 
 
+@cache.memoize(timeout=3600)
 def load_naics_codes() -> pd.DataFrame:
     """Load local NAICS codes."""
     return pd.read_excel("assets/2022_NAICS_Descriptions (6).xlsx")
@@ -517,11 +530,13 @@ sector_empl = tweak_sector_employment(sector_empl_raw, naics_codes) if not secto
 ai_df_yes = ai_df.loc[ai_df["Answer"] == "Yes"] if not ai_df.empty else pd.DataFrame()
 ai_df_no = ai_df.loc[ai_df["Answer"] == "No"] if not ai_df.empty else pd.DataFrame()
 
-# Debug printouts
-print("AI DF rows:", len(ai_df))
+# Compute dynamic date range for UI header
 if not ai_df.empty:
-    print("AI DF date min/max:", ai_df["end_date"].min(), ai_df["end_date"].max())
-    print("Unique months:", ai_df["end_date"].dt.to_period("M").nunique())
+    DATA_DATE_MIN = ai_df["end_date"].min().strftime("%b %Y")
+    DATA_DATE_MAX = ai_df["end_date"].max().strftime("%b %Y")
+    DATA_DATE_RANGE = f"{DATA_DATE_MIN} - {DATA_DATE_MAX}"
+else:
+    DATA_DATE_RANGE = "No data available"
 
 # =============================================================================
 # SECTION 7: FIGURE CREATION FUNCTIONS
@@ -551,10 +566,6 @@ def create_national_figure(df: pd.DataFrame, title: str):
     if df.empty:
         return create_empty_figure("No data available")
 
-    # Debug: Check what data we're working with
-    print(f"create_national_figure({title}): input df has {len(df)} rows")
-    print(f"  Date range: {df['end_date'].min()} to {df['end_date'].max()}")
-
     grouped = (
         df
         .groupby(["Question", pd.Grouper(key="end_date", freq="ME")])["percentage"]
@@ -562,7 +573,6 @@ def create_national_figure(df: pd.DataFrame, title: str):
         .round(2)
         .reset_index()
     )
-    print(f"  After groupby: {len(grouped)} rows, dates: {grouped['end_date'].min()} to {grouped['end_date'].max()}")
 
     fig = px.line(
         grouped,
@@ -587,9 +597,6 @@ def create_national_figure(df: pd.DataFrame, title: str):
     return fig
 
 
-print("ai_df_yes rows:", len(ai_df_yes), "date range:", ai_df_yes["end_date"].min(), "to", ai_df_yes["end_date"].max() if not ai_df_yes.empty else "empty")
-print("ai_df_no rows:", len(ai_df_no), "date range:", ai_df_no["end_date"].min(), "to", ai_df_no["end_date"].max() if not ai_df_no.empty else "empty")
-
 fig_yes = create_national_figure(ai_df_yes, "Did you use AI? Yes")
 fig_no = create_national_figure(ai_df_no, "Did you use AI? No")
 
@@ -606,7 +613,7 @@ app.layout = dbc.Container([
             width=12
         ),
         dbc.Col(
-            html.Small(f"Data: Sep 2023 - Jan 2026 ({len(ai_df)} records)", className="text-muted text-center d-block mb-2"),
+            html.Small(f"Data: {DATA_DATE_RANGE} ({len(ai_df)} records)", className="text-muted text-center d-block mb-2"),
             width=12
         ),
         dbc.Col(
@@ -704,9 +711,7 @@ app.layout = dbc.Container([
                                 config={"responsive": True}
                             )
                         ]
-                    ),
-                    # Hidden dropdown to maintain callback compatibility
-                    html.Div(dcc.Dropdown(id="map-date-dropdown"), style={"display": "none"})
+                    )
                 ])
             ])
         ], width=12)
@@ -818,16 +823,6 @@ app.layout = dbc.Container([
 # =============================================================================
 
 @app.callback(
-    Output("map-date-dropdown", "options"),
-    Output("map-date-dropdown", "value"),
-    Input("map-question-dropdown", "value")
-)
-def update_map_date_options(_question):
-    """Populate date dropdown - kept for compatibility but not displayed."""
-    return [], None
-
-
-@app.callback(
     [Output("choropleth-map", "figure"),
      Output("map-subtitle", "children")],
     [Input("map-question-dropdown", "value"),
@@ -918,7 +913,7 @@ def map_click_to_dropdown(click_data):
 
     state_code = click_data["points"][0].get("location")
     if state_code:
-        state_name = {v: k for k, v in STATE_CODES.items()}.get(state_code)
+        state_name = CODE_TO_STATE.get(state_code)
         return [state_name] if state_name else dash.no_update
 
     return dash.no_update
@@ -973,7 +968,7 @@ def update_states_plot(selected_states, selected_question, selected_answer):
     )
     fig.add_annotation(
         x=filtered_df["end_date"].max(), y=median_value - 0.5,
-        text="National Median",
+        text="Selection Median",
         showarrow=False,
         font=dict(family="Times New Roman", size=12, color="red")
     )
@@ -1030,7 +1025,7 @@ def update_sector_plot(selected_industry, selected_question, selected_answer):
     )
     fig.add_annotation(
         x=filtered_df["end_date"].max(), y=median_value - 0.5,
-        text="National Median",
+        text="Selection Median",
         showarrow=False,
         font=dict(family="Times New Roman", size=12, color="red")
     )
@@ -1051,7 +1046,11 @@ def trigger_download(n_clicks):
     """Trigger PDF download."""
     if n_clicks:
         file_path = "assets/BTOS_AI_Data_Description.pdf"
-        return dcc.send_file(file_path)
+        if os.path.exists(file_path):
+            return dcc.send_file(file_path)
+        else:
+            logger.error(f"PDF file not found: {file_path}")
+            return None
 
 
 # =============================================================================
